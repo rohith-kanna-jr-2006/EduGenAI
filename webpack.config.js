@@ -1,5 +1,6 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
+const webpack = require('webpack');
 
 module.exports = {
   entry: path.resolve(__dirname, 'src/index.js'),
@@ -39,6 +40,11 @@ module.exports = {
     new HtmlWebpackPlugin({
       template: path.resolve(__dirname, 'public/index.html'),
       title: 'EduGenAI — AI-Powered Educational Image Generation Platform',
+    }),
+    new webpack.DefinePlugin({
+      'process.env.REACT_APP_API_BASE_URL': JSON.stringify(
+        process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000/api'
+      ),
     }),
   ],
   devServer: {
