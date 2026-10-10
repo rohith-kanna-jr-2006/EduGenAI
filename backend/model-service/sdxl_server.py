@@ -75,8 +75,9 @@ def load_pipeline():
 class GenerationRequest(BaseModel):
     prompt: str
     negative_prompt: Optional[str] = "low quality, blurry, deformed"
-    num_inference_steps: int = Field(default=20, ge=1, le=100)
-    guidance_scale: float = Field(default=7.0, ge=0.0, le=25.0)
+    steps: Optional[int] = Field(default=None, ge=1, le=100)
+    num_inference_steps: Optional[int] = Field(default=None, ge=1, le=100)
+    guidance_scale: float = Field(default=5.0, ge=0.0, le=25.0)
     width: int = Field(default=1024, ge=256, le=2048)
     height: int = Field(default=1024, ge=256, le=2048)
     seed: Optional[int] = None
@@ -97,6 +98,9 @@ def health_check():
 def generate_image(req: GenerationRequest):
     pipe = load_pipeline()
 
+    # Determine effective inference steps
+    effective_steps = req.steps if req.steps is not None else (req.num_inference_steps if req.num_inference_steps is not None else 15)
+
     generator = None
     if req.seed is not None:
         generator = torch.Generator(device=device).manual_seed(req.seed)
@@ -108,7 +112,7 @@ def generate_image(req: GenerationRequest):
         result = pipe(
             prompt=req.prompt,
             negative_prompt=req.negative_prompt,
-            num_inference_steps=req.num_inference_steps,
+            num_inference_steps=effective_steps,
             guidance_scale=req.guidance_scale,
             width=req.width,
             height=req.height,
@@ -125,18 +129,19 @@ def generate_image(req: GenerationRequest):
         base64_str = base64.b64encode(img_bytes).decode("utf-8")
         data_url = f"data:image/jpeg;base64,{base64_str}"
 
-        gpu_mem = None
+        peak_gpu_gib = None
         if torch.cuda.is_available():
-            gpu_mem = round(torch.cuda.memory_allocated(0) / (1024 * 1024), 2)
+            peak_gpu_gib = round(torch.cuda.max_memory_allocated(0) / (1024 ** 3), 2)
 
         return {
             "status": "success",
             "image": data_url,
             "metrics": {
+                "generation_seconds": elapsed,
                 "inference_time_seconds": elapsed,
                 "device": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU",
-                "steps": req.num_inference_steps,
-                "gpu_memory_allocated_mb": gpu_mem
+                "steps": effective_steps,
+                "peak_gpu_memory_gib": peak_gpu_gib
             }
         }
     except Exception as e:

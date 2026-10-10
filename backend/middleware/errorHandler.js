@@ -2,13 +2,22 @@
  * EduGenAI - Centralized Error Handling Middleware
  * 
  * Intercepts unhandled errors, formats consistent JSON responses,
- * and handles model service unavailability cleanly without fake claims.
+ * and adheres to exact status codes:
+ * - 400: invalid user input
+ * - 429: rate limit exceeded
+ * - 502: invalid response or failure from upstream model service
+ * - 503: model service unavailable or not configured
+ * - 504: upstream model generation timed out
+ * - 500: unexpected internal server error
+ * 
+ * Never leaks stack traces or internal credentials in client responses.
  */
 
 function errorHandler(err, req, res, next) {
-  console.error(`[Error] [${req.method} ${req.url}] ${err.name}: ${err.message}`);
+  // Server-side diagnostic log
+  console.error(`[Error] [${req.method} ${req.url}] ${err.name || 'Error'}: ${err.message}`);
 
-  // Handle invalid JSON body syntax
+  // Handle invalid JSON body syntax (HTTP 400)
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     return res.status(400).json({
       success: false,
@@ -19,19 +28,30 @@ function errorHandler(err, req, res, next) {
     });
   }
 
-  // Handle Model Service Error (e.g. SDXL Colab offline, connection refused, timeout)
+  // Handle Model Service Error (HTTP 502, 503, 504)
   if (err.name === 'ModelServiceError') {
     return res.status(err.statusCode || 503).json({
       success: false,
       error: {
-        code: 'MODEL_SERVICE_UNAVAILABLE',
+        code: err.statusCode === 504 ? 'GATEWAY_TIMEOUT' : err.statusCode === 503 ? 'MODEL_SERVICE_UNAVAILABLE' : 'UPSTREAM_MODEL_ERROR',
         message: err.message,
         details: err.details || undefined
       }
     });
   }
 
-  // Generic internal server error
+  // Handle CORS Forbidden error
+  if (err.message && err.message.includes('CORS')) {
+    return res.status(403).json({
+      success: false,
+      error: {
+        code: 'CORS_FORBIDDEN',
+        message: err.message
+      }
+    });
+  }
+
+  // Generic internal server error (HTTP 500)
   const statusCode = err.statusCode || (res.statusCode >= 400 ? res.statusCode : 500);
   const responseError = {
     code: err.code || 'INTERNAL_SERVER_ERROR',

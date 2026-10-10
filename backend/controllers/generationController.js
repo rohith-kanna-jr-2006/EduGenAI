@@ -1,12 +1,13 @@
 /**
  * EduGenAI - Generation Controller
  * 
- * Orchestrates request validation, energy-aware generation policy selection,
- * SDXL model invocation, and history persistence.
+ * Orchestrates request validation, generation policy enforcement,
+ * relative compute estimation, SDXL model invocation, and history persistence.
  */
 
-const { selectPolicy } = require('../services/generationPolicyService');
-const { invokeSdxlModel, checkModelServiceHealth } = require('../services/modelService');
+const { getEffectivePolicy } = require('../services/generationPolicyService');
+const { calculateResourceEstimates, getQualityTiers: fetchQualityTiers } = require('../services/resourceEstimationService');
+const { invokeModelService, checkModelHealth } = require('../services/modelService');
 const { saveRecord, getHistory: fetchHistory, deleteRecord } = require('../services/historyService');
 
 /**
@@ -14,140 +15,115 @@ const { saveRecord, getHistory: fetchHistory, deleteRecord } = require('../servi
  * GET /api/health
  */
 async function healthCheck(req, res) {
-  const modelHealth = await checkModelServiceHealth();
+  const modelCheck = await checkModelHealth();
 
   res.status(200).json({
     success: true,
-    status: 'healthy',
-    service: 'EduGenAI Backend',
-    uptimeSeconds: Math.floor(process.uptime()),
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
+    message: 'EduGenAI backend is running',
     modelService: {
-      endpoint: process.env.SDXL_MODEL_ENDPOINT || 'http://localhost:8000/generate',
-      status: modelHealth.status
+      status: modelCheck.status,
+      configured: modelCheck.configured
     }
   });
 }
 
 /**
- * Available conditions and resource baselines endpoint
- * GET /api/quality-tiers or GET /api/conditions
+ * Quality tiers and condition baselines endpoint
+ * GET /api/quality-tiers (and GET /api/conditions)
  */
-function getConditions(req, res) {
-  const economySteps = parseInt(process.env.ECONOMY_STEPS, 10) || 15;
-  const highQualitySteps = parseInt(process.env.HIGH_QUALITY_STEPS, 10) || 50;
-  const ecoEnergyWh = parseFloat(process.env.ECO_ENERGY_WH) || 0.5;
-  const highEnergyWh = parseFloat(process.env.HIGH_ENERGY_WH) || 2.0;
-  const gridCarbonIntensity = parseFloat(process.env.GRID_CARBON_INTENSITY) || 475;
-
-  const ecoSavingsWh = parseFloat(Math.max(0, highEnergyWh - ecoEnergyWh).toFixed(3));
-  const ecoSavingsPercent = highEnergyWh > 0 ? parseFloat(((ecoSavingsWh / highEnergyWh) * 100).toFixed(1)) : 0;
-
-  res.status(200).json({
-    success: true,
-    conditions: [
-      {
-        id: 'economy',
-        name: 'Economy Mode',
-        description: 'Optimized for sustainability and speed using fewer inference steps to reduce computational effort.',
-        inferenceSteps: economySteps,
-        computationalEffort: 'low',
-        relativeComputeUnits: economySteps,
-        relativeComputeSavedUnits: highQualitySteps - economySteps,
-        relativeComputeSavingsPercentage: highQualitySteps > 0 ? ((highQualitySteps - economySteps) / highQualitySteps) * 100 : 0,
-        estimatedEnergyWh: ecoEnergyWh,
-        energySavedWh: ecoSavingsWh,
-        energySavedPercentage: ecoSavingsPercent,
-        estimatedCarbonGCO2e: parseFloat(((ecoEnergyWh / 1000) * gridCarbonIntensity).toFixed(3))
-      },
-      {
-        id: 'high_quality',
-        name: 'High Quality Mode',
-        description: 'Maximum visual detail and fidelity using full inference steps.',
-        inferenceSteps: highQualitySteps,
-        computationalEffort: 'high',
-        relativeComputeUnits: highQualitySteps,
-        relativeComputeSavedUnits: 0,
-        relativeComputeSavingsPercentage: 0,
-        estimatedEnergyWh: highEnergyWh,
-        energySavedWh: 0,
-        energySavedPercentage: 0,
-        estimatedCarbonGCO2e: parseFloat(((highEnergyWh / 1000) * gridCarbonIntensity).toFixed(3))
-      }
-    ],
-    baseline: {
-      highQualityBaselineSteps: highQualitySteps,
-      highQualityBaselineEnergyWh: highEnergyWh,
-      disclaimer: 'Compute units and energy values are model-based comparative estimates. Reducing inference steps reduces GPU compute workload, but actual physical electricity consumption depends on runtime hardware and data center infrastructure.'
-    }
-  });
+function getQualityTiers(req, res) {
+  const tiersData = fetchQualityTiers();
+  res.status(200).json(tiersData);
 }
 
 /**
  * Image generation endpoint
- * POST /api/generate and POST /api/generation/create
+ * POST /api/generate (and POST /api/generation/create)
  */
 async function generate(req, res, next) {
   try {
-    const payload = req.validatedData || req.body;
-    const { prompt, category, constraints, condition, settings } = payload;
+    const validatedData = req.validatedData || req.body;
+    const { prompt, combinedPrompt, category, constraints, condition, settings } = validatedData;
 
-    // 1. Select generation policy based on user condition
-    const policyDecision = selectPolicy(condition, category, constraints, {
-      ...settings,
-      prompt
+    // 1. Enforce server-side policy (Economy: 15 steps, High Quality: 30 steps)
+    const effectivePolicy = getEffectivePolicy(condition, settings);
+
+    // 2. Compute illustrative relative compute proxy estimates
+    const resourceEstimates = calculateResourceEstimates(condition);
+
+    // 3. Invoke external SDXL model service via HTTP
+    // Never returns fake image URLs if generation fails (throws ModelServiceError)
+    const modelResult = await invokeModelService({
+      prompt: combinedPrompt,
+      width: effectivePolicy.width,
+      height: effectivePolicy.height,
+      steps: effectivePolicy.steps,
+      guidanceScale: effectivePolicy.guidanceScale,
+      seed: effectivePolicy.seed
     });
 
-    // 2. Invoke the external SDXL Model Service via HTTP
-    // Will throw ModelServiceError if offline, timeout, or failed (no mock images!)
-    const modelResult = await invokeSdxlModel(policyDecision.modelParameters);
-
-    // 3. Persist record to history
+    // 4. Persist generation record to disk without secrets
     const record = saveRecord({
       prompt,
+      combinedPrompt,
       category,
       constraints,
-      condition: policyDecision.condition,
+      condition: effectivePolicy.condition,
+      steps: effectivePolicy.steps,
+      guidanceScale: effectivePolicy.guidanceScale,
+      seed: effectivePolicy.seed,
       image: modelResult.image,
-      policy: policyDecision.policy,
       measurements: modelResult.measurements,
-      settings: policyDecision.modelParameters
+      resourceEstimates
     });
 
-    // 4. Return response compatible with both API specification and React frontend
+    // 5. Return standardized JSON response
     return res.status(200).json({
       success: true,
       image: {
-        url: modelResult.image.url
+        url: modelResult.image.url,
+        data: modelResult.image.data
       },
-      condition: policyDecision.condition,
-      category: policyDecision.category,
-      policy: policyDecision.policy,
-      measurements: modelResult.measurements,
+      metadata: {
+        tier: effectivePolicy.condition,
+        category: category,
+        resolution: `${effectivePolicy.width}x${effectivePolicy.height}`,
+        steps: effectivePolicy.steps,
+        guidanceScale: effectivePolicy.guidanceScale,
+        seed: effectivePolicy.seed,
+        generationSeconds: modelResult.measurements.generationSeconds,
+        peakGpuMemoryGiB: modelResult.measurements.peakGpuMemoryGiB,
+        relativeUnits: resourceEstimates.relativeUnits,
+        baselineUnits: resourceEstimates.baselineUnits,
+        estimatedRelativeReductionPercent: resourceEstimates.estimatedRelativeReductionPercent,
+        measurementType: resourceEstimates.measurementType
+      },
+      // Compatible payload for existing React frontend state
       data: {
         id: record.id,
         title: prompt.length > 40 ? prompt.substring(0, 40) + '...' : prompt,
         prompt,
-        category: category || 'worksheet',
-        gradeLevel: req.body.gradeLevel || 'Standard Curriculum',
-        modelUsed: `SDXL (${policyDecision.condition === 'economy' ? 'Eco' : 'HQ'})`,
+        category,
+        modelUsed: `SDXL (${effectivePolicy.condition === 'economy' ? 'Economy 15-Steps' : 'High Quality 30-Steps'})`,
         status: 'completed',
-        downloadUrl: modelResult.image.url,
-        dimensions: `${policyDecision.modelParameters.width} x ${policyDecision.modelParameters.height}`,
+        downloadUrl: modelResult.image.url || modelResult.image.data,
+        dimensions: `${effectivePolicy.width} x ${effectivePolicy.height}`,
         createdAt: record.createdAt,
-        resources: policyDecision.policy
-      },
-      message: 'Image generated successfully via SDXL pipeline.'
+        resources: {
+          steps: effectivePolicy.steps,
+          relativeUnits: resourceEstimates.relativeUnits,
+          savingsPercent: resourceEstimates.estimatedRelativeReductionPercent
+        }
+      }
     });
-  } catch (err) {
-    next(err);
+  } catch (error) {
+    next(error);
   }
 }
 
 /**
- * History endpoint
- * GET /api/history and GET /api/generation/history
+ * Generation history endpoint
+ * GET /api/history (and GET /api/generation/history)
  */
 function getHistory(req, res) {
   const { limit, offset, search, category, status } = req.query;
@@ -167,7 +143,7 @@ function deleteGeneration(req, res) {
 
 module.exports = {
   healthCheck,
-  getConditions,
+  getQualityTiers,
   generate,
   getHistory,
   deleteGeneration

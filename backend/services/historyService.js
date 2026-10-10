@@ -1,9 +1,11 @@
 /**
  * EduGenAI - History Persistence Service
  * 
- * Provides disk-backed JSON persistence for image generations.
- * Supports pagination, category filtering, search, and record deletion.
- * Never stores API keys or secrets.
+ * Provides disk-backed JSON storage for image generation history.
+ * - Stores generation timestamp, prompt, category, condition, effective inference settings,
+ *   generation duration, resource estimates, and image data.
+ * - Strictly never stores API keys or secrets.
+ * - Automatically initializes backend/data/history.json.
  */
 
 const fs = require('fs');
@@ -22,7 +24,7 @@ function initializeStorage() {
       fs.writeFileSync(HISTORY_FILE, JSON.stringify([], null, 2), 'utf8');
     }
   } catch (err) {
-    console.error('[HistoryService] Failed to initialize history storage:', err.message);
+    console.error('[HistoryService] Failed to initialize history directory:', err.message);
   }
 }
 
@@ -34,7 +36,7 @@ function readHistory() {
       return JSON.parse(data || '[]');
     }
   } catch (err) {
-    console.error('[HistoryService] Error reading history file:', err.message);
+    console.error('[HistoryService] Error reading history records:', err.message);
   }
   return [];
 }
@@ -45,44 +47,63 @@ function writeHistory(records) {
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(records, null, 2), 'utf8');
     return true;
   } catch (err) {
-    console.error('[HistoryService] Error writing history file:', err.message);
+    console.error('[HistoryService] Error writing history records:', err.message);
     return false;
   }
 }
 
 /**
- * Save new generation record
+ * Save a new generation record
  */
-function saveRecord({ prompt, category, constraints, condition, image, policy, measurements, settings }) {
+function saveRecord({
+  prompt,
+  combinedPrompt,
+  category,
+  constraints,
+  condition,
+  steps,
+  guidanceScale,
+  seed,
+  image,
+  measurements,
+  resourceEstimates
+}) {
   const records = readHistory();
 
   const record = {
     id: `gen_${crypto.randomUUID()}`,
-    title: prompt.length > 40 ? prompt.substring(0, 40) + '...' : prompt,
+    timestamp: new Date().toISOString(),
     prompt,
-    category: category || 'worksheet',
+    combinedPrompt,
+    category: category || 'education',
     constraints: constraints || [],
     condition: condition || 'economy',
+    effectiveSettings: {
+      width: 1024,
+      height: 1024,
+      steps,
+      guidanceScale,
+      seed
+    },
+    generationDurationSeconds: measurements?.generationSeconds || null,
+    peakGpuMemoryGiB: measurements?.peakGpuMemoryGiB || null,
+    resourceEstimates: {
+      relativeUnits: resourceEstimates?.relativeUnits || (condition === 'economy' ? 0.5 : 1.0),
+      baselineUnits: resourceEstimates?.baselineUnits || 1.0,
+      estimatedRelativeReductionPercent: resourceEstimates?.estimatedRelativeReductionPercent || 0,
+      measurementType: 'illustrative relative compute proxy, not measured energy'
+    },
     image: {
-      url: image.url
+      url: image?.url || null
     },
-    downloadUrl: image.url,
-    policy,
-    measurements,
-    settings: {
-      width: settings?.width || 1024,
-      height: settings?.height || 1024,
-      guidanceScale: settings?.guidanceScale || 7.0,
-      seed: settings?.seed
-    },
-    status: 'completed',
-    reviewStatus: 'approved',
-    qualityScore: condition === 'high_quality' ? 98 : 94,
+    downloadUrl: image?.url || null,
     createdAt: new Date().toISOString()
   };
 
+  // Prepend to array
   records.unshift(record);
 
+  // Cap at 500 records to prevent disk exhaustion
   if (records.length > 500) {
     records.length = 500;
   }
@@ -92,7 +113,7 @@ function saveRecord({ prompt, category, constraints, condition, image, policy, m
 }
 
 /**
- * Retrieve history with filtering and pagination
+ * Get history records with filtering and pagination
  */
 function getHistory(filters = {}) {
   const records = readHistory();
@@ -101,7 +122,7 @@ function getHistory(filters = {}) {
   if (filters.search) {
     const q = filters.search.toLowerCase().trim();
     items = items.filter(
-      (r) => (r.title && r.title.toLowerCase().includes(q)) || (r.prompt && r.prompt.toLowerCase().includes(q))
+      (r) => (r.prompt && r.prompt.toLowerCase().includes(q)) || (r.category && r.category.toLowerCase().includes(q))
     );
   }
 
@@ -109,8 +130,8 @@ function getHistory(filters = {}) {
     items = items.filter((r) => r.category === filters.category);
   }
 
-  if (filters.status && filters.status !== 'all') {
-    items = items.filter((r) => r.reviewStatus === filters.status);
+  if (filters.condition && filters.condition !== 'all') {
+    items = items.filter((r) => r.condition === filters.condition);
   }
 
   const limit = Math.min(Math.max(parseInt(filters.limit, 10) || 50, 1), 100);
@@ -124,14 +145,14 @@ function getHistory(filters = {}) {
     limit,
     offset,
     hasMore: offset + limit < items.length,
-    items: paginated,
     history: paginated,
-    storageType: 'persistent_json_file'
+    items: paginated,
+    storageType: 'persistent_disk_json'
   };
 }
 
 /**
- * Delete a generation record by id
+ * Delete a generation record
  */
 function deleteRecord(id) {
   const records = readHistory();

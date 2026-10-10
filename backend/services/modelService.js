@@ -1,14 +1,15 @@
 /**
- * EduGenAI - Model Service
+ * EduGenAI - SDXL Model Service Integration
  * 
- * Manages HTTP communication between Express backend and the external
- * Python-based Stable Diffusion XL (SDXL) model service (e.g., hosted in Google Colab,
- * RunPod, or local GPU server).
+ * Manages HTTP communication between the Express backend and the external
+ * Python-based Stable Diffusion XL (SDXL) model service.
  * 
- * Strict safety rules:
- * - Never returns fake or mock images if inference fails.
- * - Never claims images were generated if the model service is unreachable.
- * - Captures actual performance measurements from the model service where provided.
+ * Configured via MODEL_SERVICE_URL in .env.
+ * 
+ * Critical integrity rules:
+ * - Never returns a fake successful response.
+ * - Never invents image URLs or placeholders if model generation fails.
+ * - Surfaces genuine generation duration and peak GPU memory only when available.
  */
 
 const axios = require('axios');
@@ -23,131 +24,191 @@ class ModelServiceError extends Error {
 }
 
 /**
- * Sends generation parameters to the external SDXL Model Service
+ * Sends generation parameters to the external SDXL Model Service via HTTP
  * 
- * @param {Object} modelParams - compiled parameters from generationPolicyService
- * @returns {Promise<Object>} Generated image payload and actual runtime measurements
+ * @param {Object} params - Validated generation parameters
+ * @param {string} params.prompt - Combined prompt with constraints
+ * @param {number} params.width - Fixed at 1024
+ * @param {number} params.height - Fixed at 1024
+ * @param {number} params.steps - 15 (economy) or 30 (high_quality)
+ * @param {number} params.guidanceScale - Guidance scale (default 5.0)
+ * @param {number} params.seed - Integer seed
+ * @returns {Promise<Object>} Generated image payload and genuine measurements
  */
-async function invokeSdxlModel(modelParams) {
-  const endpoint = process.env.SDXL_MODEL_ENDPOINT || 'http://localhost:8000/generate';
-  const timeoutMs = parseInt(process.env.REQUEST_TIMEOUT_MS, 10) || 90000; // 90s for SDXL diffusion
+async function invokeModelService(params) {
+  const modelServiceUrl = process.env.MODEL_SERVICE_URL || process.env.SDXL_MODEL_ENDPOINT;
 
-  const payload = {
-    prompt: modelParams.prompt,
-    negative_prompt: modelParams.negativePrompt,
-    num_inference_steps: modelParams.numInferenceSteps,
-    guidance_scale: modelParams.guidanceScale,
-    width: modelParams.width,
-    height: modelParams.height,
-    seed: modelParams.seed
+  if (!modelServiceUrl || modelServiceUrl.trim() === '') {
+    throw new ModelServiceError(
+      'MODEL_SERVICE_URL is not configured. Please set MODEL_SERVICE_URL in backend/.env to point to your active SDXL inference endpoint (e.g. Google Colab ngrok tunnel or local GPU server).',
+      503,
+      { code: 'MODEL_SERVICE_NOT_CONFIGURED' }
+    );
+  }
+
+  const timeoutMs = parseInt(process.env.GENERATION_TIMEOUT_MS, 10) || 180000; // 180s default for SDXL
+
+  // Payload format matching SDXL inference API
+  const requestPayload = {
+    prompt: params.prompt,
+    width: params.width,
+    height: params.height,
+    steps: params.steps,
+    num_inference_steps: params.steps, // diffusers compatibility alias
+    guidance_scale: params.guidanceScale,
+    seed: params.seed
   };
+
+  const headers = {
+    'Content-Type': 'application/json'
+  };
+
+  if (process.env.MODEL_SERVICE_API_KEY) {
+    headers['Authorization'] = `Bearer ${process.env.MODEL_SERVICE_API_KEY.trim()}`;
+  }
 
   const startTime = Date.now();
 
   try {
-    const response = await axios.post(endpoint, payload, {
+    const response = await axios.post(modelServiceUrl, requestPayload, {
       timeout: timeoutMs,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(process.env.SDXL_API_KEY ? { 'Authorization': `Bearer ${process.env.SDXL_API_KEY}` } : {})
-      }
+      headers
     });
 
     const elapsedSeconds = parseFloat(((Date.now() - startTime) / 1000).toFixed(2));
-    const data = response.data;
+    const responseData = response.data;
 
-    // Validate model response payload
-    const imageUrl = data?.image || data?.image_url || data?.url;
-    if (!imageUrl) {
+    // Validate that the model returned image data or an accessible URL
+    const rawImage = responseData?.image || responseData?.image_url || responseData?.url || responseData?.data;
+
+    if (!rawImage) {
       throw new ModelServiceError(
-        'The SDXL model service returned a response, but no valid image data or URL was found.',
+        'The SDXL model service completed the request, but did not return any image data or accessible image URL.',
         502,
-        data
+        { upstreamResponse: responseData }
       );
     }
 
-    // Extract actual performance measurements provided by Python SDXL backend
-    const measurements = {
-      measuredInferenceTimeSeconds: data.metrics?.inference_time_seconds || elapsedSeconds,
-      device: data.metrics?.device || data.device || 'SDXL Engine',
-      actualSteps: data.metrics?.steps || modelParams.numInferenceSteps,
-      memoryAllocatedMb: data.metrics?.gpu_memory_allocated_mb || null
-    };
+    let imageUrl = null;
+    let imageData = null;
+
+    if (typeof rawImage === 'string') {
+      if (rawImage.startsWith('http://') || rawImage.startsWith('https://')) {
+        imageUrl = rawImage;
+      } else if (rawImage.startsWith('data:image/')) {
+        imageData = rawImage;
+        imageUrl = rawImage; // accessible in browser img tags
+      } else {
+        // Raw base64 string without data prefix
+        imageData = `data:image/jpeg;base64,${rawImage}`;
+        imageUrl = imageData;
+      }
+    }
+
+    // Genuine measurements extraction (only when genuinely reported)
+    let generationSeconds = elapsedSeconds;
+    if (responseData.metrics?.generation_seconds !== undefined && responseData.metrics.generation_seconds !== null) {
+      generationSeconds = Number(responseData.metrics.generation_seconds);
+    } else if (responseData.metrics?.inference_time_seconds !== undefined && responseData.metrics.inference_time_seconds !== null) {
+      generationSeconds = Number(responseData.metrics.inference_time_seconds);
+    }
+
+    let peakGpuMemoryGiB = null;
+    if (responseData.metrics?.peak_gpu_memory_gib !== undefined && responseData.metrics.peak_gpu_memory_gib !== null) {
+      peakGpuMemoryGiB = Number(responseData.metrics.peak_gpu_memory_gib);
+    } else if (responseData.metrics?.gpu_memory_allocated_mb !== undefined && responseData.metrics.gpu_memory_allocated_mb !== null) {
+      peakGpuMemoryGiB = parseFloat((responseData.metrics.gpu_memory_allocated_mb / 1024).toFixed(2));
+    }
 
     return {
-      success: true,
       image: {
-        url: imageUrl
+        url: imageUrl,
+        data: imageData
       },
-      measurements
+      measurements: {
+        generationSeconds,
+        peakGpuMemoryGiB
+      }
     };
   } catch (error) {
-    // If request timed out
+    if (error instanceof ModelServiceError) {
+      throw error;
+    }
+
+    // Request timeout (HTTP 504)
     if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
       throw new ModelServiceError(
-        `SDXL model inference timed out after ${timeoutMs / 1000} seconds. The model server may be overloaded or cold-starting.`,
+        `SDXL model generation timed out after ${timeoutMs / 1000} seconds. The upstream inference pipeline may be overloaded or initializing.`,
         504,
-        { endpoint, timeoutMs }
+        { timeoutMs, endpoint: modelServiceUrl }
       );
     }
 
-    // If connection refused or not found (Colab / server not running)
+    // Connection refused / unreachable endpoint (HTTP 503)
     if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
       throw new ModelServiceError(
-        `Cannot connect to SDXL model service at "${endpoint}". Please verify that your Python/Google Colab SDXL inference server is running and accessible.`,
+        `Cannot connect to SDXL model service at "${modelServiceUrl}". Please verify that your Python/Google Colab SDXL inference server is running and accessible.`,
         503,
-        {
-          endpoint,
-          solution: 'Start your SDXL inference service (e.g. running the provided Colab script) and update SDXL_MODEL_ENDPOINT in backend/.env'
-        }
+        { endpoint: modelServiceUrl, error: error.message }
       );
     }
 
-    // If model service returned an HTTP error code (e.g. 500, 422)
+    // Upstream server responded with an error (HTTP 502 / upstream status)
     if (error.response) {
       const status = error.response.status;
-      const errorMsg = error.response.data?.detail || error.response.data?.error || error.response.statusText;
+      const detail = error.response.data?.detail || error.response.data?.error || error.response.statusText;
       throw new ModelServiceError(
-        `SDXL model service responded with error (${status}): ${errorMsg}`,
+        `SDXL model service failed with status ${status}: ${detail}`,
         status >= 500 ? 502 : status,
-        error.response.data
+        { upstreamStatus: status, upstreamData: error.response.data }
       );
     }
 
-    // Generic error
+    // Generic network / communication error (HTTP 502)
     throw new ModelServiceError(
       `Failed to communicate with SDXL model service: ${error.message}`,
-      503,
-      { endpoint, originalError: error.message }
+      502,
+      { error: error.message }
     );
   }
 }
 
 /**
- * Checks connectivity to the SDXL model service endpoint
+ * Checks connectivity to the model service without triggering an image generation
  */
-async function checkModelServiceHealth() {
-  const endpoint = process.env.SDXL_MODEL_ENDPOINT || 'http://localhost:8000/generate';
-  const healthUrl = endpoint.replace(/\/generate\/?$/, '/health');
+async function checkModelHealth() {
+  const modelServiceUrl = process.env.MODEL_SERVICE_URL || process.env.SDXL_MODEL_ENDPOINT;
+
+  if (!modelServiceUrl) {
+    return {
+      configured: false,
+      status: 'not_configured',
+      message: 'MODEL_SERVICE_URL is not set in environment variables'
+    };
+  }
+
+  const healthUrl = modelServiceUrl.replace(/\/generate\/?$/, '/health');
 
   try {
-    const res = await axios.get(healthUrl, { timeout: 4000 });
+    const res = await axios.get(healthUrl, { timeout: 3000 });
     return {
+      configured: true,
       status: 'online',
-      endpoint,
+      endpoint: modelServiceUrl,
       details: res.data
     };
   } catch (err) {
     return {
+      configured: true,
       status: 'offline',
-      endpoint,
+      endpoint: modelServiceUrl,
       error: err.message
     };
   }
 }
 
 module.exports = {
-  invokeSdxlModel,
-  checkModelServiceHealth,
+  invokeModelService,
+  checkModelHealth,
   ModelServiceError
 };

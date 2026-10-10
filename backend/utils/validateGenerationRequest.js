@@ -1,121 +1,206 @@
 /**
- * EduGenAI - Request Validation Middleware & Validator
+ * EduGenAI - Generation Request Validation Utility
  * 
- * Validates generation requests for:
- * - prompt: required, non-empty, 3-1000 chars
- * - category: optional string
- * - constraints: optional array of strings
- * - condition: required / normalized ('economy' | 'high_quality')
- * - settings: width, height, guidanceScale, seed
+ * Enforces strict validation for POST /api/generate:
+ * - prompt: required, non-empty trimmed string, max 1000 chars
+ * - category: allowed: education, art, general, science, design
+ * - constraints: array of strings (max 10 items, max 100 chars each)
+ * - condition: 'economy' | 'high_quality'
+ * - settings: width == 1024, height == 1024, guidanceScale (1.0-20.0), seed (integer or auto-generated)
  */
 
+const ALLOWED_CATEGORIES = ['education', 'art', 'general', 'science', 'design'];
+const ALLOWED_CONDITIONS = ['economy', 'high_quality'];
+const MAX_PROMPT_LENGTH = 1000;
+const MAX_CONSTRAINTS_COUNT = 10;
+const MAX_CONSTRAINT_LENGTH = 100;
+const MIN_GUIDANCE_SCALE = 1.0;
+const MAX_GUIDANCE_SCALE = 20.0;
+const MAX_SEED_VALUE = 2147483647;
+
+/**
+ * Combines image prompt safely with constraints
+ * @param {string} prompt 
+ * @param {Array<string>} constraints 
+ * @returns {string} combined prompt
+ */
+function combinePromptWithConstraints(prompt, constraints = []) {
+  const trimmedPrompt = prompt.trim();
+  if (!Array.isArray(constraints) || constraints.length === 0) {
+    return trimmedPrompt;
+  }
+  const cleanConstraints = constraints
+    .map((c) => (typeof c === 'string' ? c.trim() : ''))
+    .filter((c) => c.length > 0);
+
+  if (cleanConstraints.length === 0) {
+    return trimmedPrompt;
+  }
+
+  return `${trimmedPrompt}, ${cleanConstraints.join(', ')}`;
+}
+
+/**
+ * Validates generation request payload
+ * @param {Object} body - Request body
+ * @returns {Object} validation result { isValid, errors, sanitized }
+ */
 function validateGenerationPayload(body) {
   const errors = [];
-  const { prompt, category, constraints, condition, settings } = body || {};
+
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return {
+      isValid: false,
+      errors: [{ field: 'body', message: 'Request body must be a valid JSON object.' }],
+      sanitized: null
+    };
+  }
+
+  const { prompt, category, constraints, condition, settings } = body;
 
   // 1. Prompt validation
+  let validatedPrompt = '';
   if (prompt === undefined || prompt === null || typeof prompt !== 'string') {
     errors.push({ field: 'prompt', message: 'Prompt is required and must be a string.' });
   } else {
-    const trimmedPrompt = prompt.trim();
-    if (trimmedPrompt.length === 0) {
+    validatedPrompt = prompt.trim();
+    if (validatedPrompt.length === 0) {
       errors.push({ field: 'prompt', message: 'Prompt cannot be empty after trimming.' });
-    } else if (trimmedPrompt.length < 3) {
-      errors.push({ field: 'prompt', message: 'Prompt must be at least 3 characters long.' });
-    } else if (trimmedPrompt.length > 1000) {
-      errors.push({ field: 'prompt', message: 'Prompt exceeds maximum length of 1000 characters.' });
+    } else if (validatedPrompt.length > MAX_PROMPT_LENGTH) {
+      errors.push({
+        field: 'prompt',
+        message: `Prompt exceeds maximum allowed length of ${MAX_PROMPT_LENGTH} characters.`
+      });
     }
   }
 
-  // 2. Condition validation ('economy' vs 'high_quality')
-  let normalizedCondition = 'economy';
-  if (condition !== undefined && condition !== null) {
-    if (typeof condition !== 'string') {
-      errors.push({ field: 'condition', message: 'Condition must be a string ("economy" or "high_quality").' });
+  // 2. Category validation
+  let validatedCategory = 'education';
+  if (category !== undefined && category !== null) {
+    if (typeof category !== 'string') {
+      errors.push({ field: 'category', message: 'Category must be a string.' });
     } else {
-      const cond = condition.toLowerCase().trim().replace(/[-]/g, '_');
-      if (['economy', 'eco', 'low'].includes(cond)) {
-        normalizedCondition = 'economy';
-      } else if (['high_quality', 'high', 'highquality'].includes(cond)) {
-        normalizedCondition = 'high_quality';
-      } else {
+      const lowerCategory = category.toLowerCase().trim();
+      if (!ALLOWED_CATEGORIES.includes(lowerCategory)) {
         errors.push({
-          field: 'condition',
-          message: `Invalid condition "${condition}". Supported conditions are: "economy" and "high_quality".`
+          field: 'category',
+          message: `Unsupported category "${category}". Allowed categories are: ${ALLOWED_CATEGORIES.join(', ')}.`
         });
+      } else {
+        validatedCategory = lowerCategory;
       }
     }
   }
 
-  // 3. Category validation (optional)
-  let validatedCategory = 'education';
-  if (category !== undefined && category !== null) {
-    if (typeof category !== 'string' || category.trim().length === 0) {
-      errors.push({ field: 'category', message: 'Category must be a non-empty string if provided.' });
-    } else {
-      validatedCategory = category.trim();
-    }
-  }
-
-  // 4. Constraints validation (optional array of strings)
+  // 3. Constraints validation
   let validatedConstraints = [];
   if (constraints !== undefined && constraints !== null) {
     if (!Array.isArray(constraints)) {
       errors.push({ field: 'constraints', message: 'Constraints must be an array of strings.' });
+    } else if (constraints.length > MAX_CONSTRAINTS_COUNT) {
+      errors.push({
+        field: 'constraints',
+        message: `Constraints array cannot exceed ${MAX_CONSTRAINTS_COUNT} items.`
+      });
     } else {
       for (let i = 0; i < constraints.length; i++) {
-        if (typeof constraints[i] !== 'string') {
-          errors.push({ field: `constraints[${i}]`, message: 'Each constraint must be a string.' });
+        const item = constraints[i];
+        if (typeof item !== 'string') {
+          errors.push({
+            field: `constraints[${i}]`,
+            message: `Constraint at index ${i} must be a string.`
+          });
         } else {
-          validatedConstraints.push(constraints[i].trim());
+          const trimmedItem = item.trim();
+          if (trimmedItem.length > MAX_CONSTRAINT_LENGTH) {
+            errors.push({
+              field: `constraints[${i}]`,
+              message: `Constraint "${trimmedItem.substring(0, 20)}..." exceeds maximum length of ${MAX_CONSTRAINT_LENGTH} characters.`
+            });
+          } else if (trimmedItem.length > 0) {
+            validatedConstraints.push(trimmedItem);
+          }
         }
       }
     }
   }
 
-  // 5. Settings validation (optional object)
+  // 4. Condition validation
+  let validatedCondition = 'economy';
+  if (condition === undefined || condition === null) {
+    errors.push({
+      field: 'condition',
+      message: `Condition is required. Allowed conditions are: ${ALLOWED_CONDITIONS.join(', ')}.`
+    });
+  } else if (typeof condition !== 'string') {
+    errors.push({ field: 'condition', message: 'Condition must be a string.' });
+  } else {
+    const lowerCondition = condition.toLowerCase().trim();
+    if (!ALLOWED_CONDITIONS.includes(lowerCondition)) {
+      errors.push({
+        field: 'condition',
+        message: `Invalid condition "${condition}". Allowed conditions are: ${ALLOWED_CONDITIONS.join(', ')}.`
+      });
+    } else {
+      validatedCondition = lowerCondition;
+    }
+  }
+
+  // 5. Settings validation
   const validatedSettings = {
     width: 1024,
     height: 1024,
-    guidanceScale: normalizedCondition === 'high_quality' ? 7.5 : 5.0,
-    seed: null
+    guidanceScale: 5.0,
+    seed: Math.floor(Math.random() * MAX_SEED_VALUE)
   };
 
   if (settings !== undefined && settings !== null) {
     if (typeof settings !== 'object' || Array.isArray(settings)) {
-      errors.push({ field: 'settings', message: 'Settings must be an object.' });
+      errors.push({ field: 'settings', message: 'Settings must be an object if provided.' });
     } else {
-      if (settings.width !== undefined) {
-        const w = parseInt(settings.width, 10);
-        if (isNaN(w) || w < 256 || w > 2048) {
-          errors.push({ field: 'settings.width', message: 'Width must be an integer between 256 and 2048.' });
-        } else {
-          validatedSettings.width = w;
+      // Width must be 1024
+      if (settings.width !== undefined && settings.width !== null) {
+        const widthNum = Number(settings.width);
+        if (!Number.isInteger(widthNum) || widthNum !== 1024) {
+          errors.push({
+            field: 'settings.width',
+            message: `Unsupported width ${settings.width}. Width must be exactly 1024 for SDXL.`
+          });
         }
       }
 
-      if (settings.height !== undefined) {
-        const h = parseInt(settings.height, 10);
-        if (isNaN(h) || h < 256 || h > 2048) {
-          errors.push({ field: 'settings.height', message: 'Height must be an integer between 256 and 2048.' });
-        } else {
-          validatedSettings.height = h;
+      // Height must be 1024
+      if (settings.height !== undefined && settings.height !== null) {
+        const heightNum = Number(settings.height);
+        if (!Number.isInteger(heightNum) || heightNum !== 1024) {
+          errors.push({
+            field: 'settings.height',
+            message: `Unsupported height ${settings.height}. Height must be exactly 1024 for SDXL.`
+          });
         }
       }
 
-      if (settings.guidanceScale !== undefined) {
-        const gs = parseFloat(settings.guidanceScale);
-        if (isNaN(gs) || gs < 1.0 || gs > 20.0) {
-          errors.push({ field: 'settings.guidanceScale', message: 'Guidance scale must be a number between 1.0 and 20.0.' });
+      // Guidance scale validation
+      if (settings.guidanceScale !== undefined && settings.guidanceScale !== null) {
+        const gs = Number(settings.guidanceScale);
+        if (typeof gs !== 'number' || !Number.isFinite(gs) || gs < MIN_GUIDANCE_SCALE || gs > MAX_GUIDANCE_SCALE) {
+          errors.push({
+            field: 'settings.guidanceScale',
+            message: `Guidance scale must be a finite number between ${MIN_GUIDANCE_SCALE} and ${MAX_GUIDANCE_SCALE}.`
+          });
         } else {
           validatedSettings.guidanceScale = gs;
         }
       }
 
+      // Seed validation
       if (settings.seed !== undefined && settings.seed !== null) {
-        const s = parseInt(settings.seed, 10);
-        if (isNaN(s)) {
-          errors.push({ field: 'settings.seed', message: 'Seed must be an integer if specified.' });
+        const s = Number(settings.seed);
+        if (!Number.isInteger(s) || s < 0 || s > MAX_SEED_VALUE) {
+          errors.push({
+            field: 'settings.seed',
+            message: `Seed must be an integer between 0 and ${MAX_SEED_VALUE}.`
+          });
         } else {
           validatedSettings.seed = s;
         }
@@ -123,14 +208,18 @@ function validateGenerationPayload(body) {
     }
   }
 
+  // Combine prompt with constraints safely
+  const combinedPrompt = combinePromptWithConstraints(validatedPrompt, validatedConstraints);
+
   return {
     isValid: errors.length === 0,
     errors,
     sanitized: {
-      prompt: prompt ? prompt.trim() : '',
+      prompt: validatedPrompt,
+      combinedPrompt,
       category: validatedCategory,
       constraints: validatedConstraints,
-      condition: normalizedCondition,
+      condition: validatedCondition,
       settings: validatedSettings
     }
   };
@@ -147,18 +236,20 @@ function validateGenerationRequest(req, res, next) {
       success: false,
       error: {
         code: 'VALIDATION_ERROR',
-        message: 'Request payload validation failed.',
+        message: 'Invalid generation request parameters.',
         details: result.errors
       }
     });
   }
 
-  // Attach sanitized and validated payload to req.validatedData
   req.validatedData = result.sanitized;
   next();
 }
 
 module.exports = {
+  ALLOWED_CATEGORIES,
+  ALLOWED_CONDITIONS,
+  combinePromptWithConstraints,
   validateGenerationPayload,
   validateGenerationRequest
 };

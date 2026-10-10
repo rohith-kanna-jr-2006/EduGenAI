@@ -91,8 +91,8 @@ const server = app.listen(PORT, () => {
   console.log(`🎓 EduGenAI Backend Server is running!`);
   console.log(`📡 URL: http://localhost:${PORT}`);
   console.log(`🔗 Allowed Frontend Origin: ${FRONTEND_URL}`);
-  console.log(`🤖 SDXL Model Endpoint: ${process.env.SDXL_MODEL_ENDPOINT || 'http://localhost:8000/generate'}`);
-  console.log(`⚡ Economy Steps: ${process.env.ECONOMY_STEPS || '15'} | High Quality Steps: ${process.env.HIGH_QUALITY_STEPS || '50'}`);
+  console.log(`🤖 Model Service URL: ${process.env.MODEL_SERVICE_URL || process.env.SDXL_MODEL_ENDPOINT || 'http://localhost:8000/generate'}`);
+  console.log(`⚡ Economy Steps: ${process.env.ECONOMY_STEPS || '15'} | High Quality Steps: ${process.env.HIGH_QUALITY_STEPS || '30'}`);
   console.log(`🩺 Health check: http://localhost:${PORT}/api/health`);
   console.log('====================================================');
 });

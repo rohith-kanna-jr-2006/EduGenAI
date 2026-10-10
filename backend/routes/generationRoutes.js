@@ -10,7 +10,7 @@ const router = express.Router();
 
 const {
   healthCheck,
-  getConditions,
+  getQualityTiers,
   generate,
   getHistory,
   deleteGeneration
@@ -23,8 +23,8 @@ const { generateLimiter } = require('../middleware/rateLimiter');
 router.get('/health', healthCheck);
 
 // GET /api/quality-tiers & GET /api/conditions - Available conditions and baselines
-router.get('/quality-tiers', getConditions);
-router.get('/conditions', getConditions);
+router.get('/quality-tiers', getQualityTiers);
+router.get('/conditions', getQualityTiers);
 
 // POST /api/generate & POST /api/generation/create - Run energy-aware generation
 router.post('/generate', generateLimiter, validateGenerationRequest, generate);
