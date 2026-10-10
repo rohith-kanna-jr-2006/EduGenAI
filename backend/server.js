@@ -65,10 +65,10 @@ app.use('/api', generationRoutes);
 // Root route with informative metadata
 app.get('/', (req, res) => {
   res.status(200).json({
-    service: 'EcoGen AI API',
-    description: 'Energy-Efficient AI Image Generation System Backend',
+    service: 'EduGenAI API',
+    description: 'Energy-Efficient AI Image Generation System Backend for SDXL',
     version: '1.0.0',
-    documentation: '/api/quality-tiers',
+    documentation: '/api/conditions',
     healthCheck: '/api/health',
     status: 'online'
   });
@@ -88,11 +88,11 @@ app.use(errorHandler);
 // ==========================================
 const server = app.listen(PORT, () => {
   console.log('====================================================');
-  console.log(`🌱 EcoGen AI Backend Server is running!`);
+  console.log(`🎓 EduGenAI Backend Server is running!`);
   console.log(`📡 URL: http://localhost:${PORT}`);
   console.log(`🔗 Allowed Frontend Origin: ${FRONTEND_URL}`);
-  console.log(`🤖 Active Image Provider: ${process.env.IMAGE_PROVIDER || 'openai'}`);
-  console.log(`⚡ Eco Baseline: ${process.env.ECO_ENERGY_WH || '0.5'} Wh | High Baseline: ${process.env.HIGH_ENERGY_WH || '2.0'} Wh`);
+  console.log(`🤖 SDXL Model Endpoint: ${process.env.SDXL_MODEL_ENDPOINT || 'http://localhost:8000/generate'}`);
+  console.log(`⚡ Economy Steps: ${process.env.ECONOMY_STEPS || '15'} | High Quality Steps: ${process.env.HIGH_QUALITY_STEPS || '50'}`);
   console.log(`🩺 Health check: http://localhost:${PORT}/api/health`);
   console.log('====================================================');
 });

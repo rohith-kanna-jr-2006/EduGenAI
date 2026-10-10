@@ -1,54 +1,57 @@
-# EcoGen AI — Backend
+# EduGenAI — Energy-Efficient AI Image Generation System Backend
 
-> **Energy-Efficient AI Image Generation System Backend**  
-> Built with Node.js, Express.js, and modular AI image generation providers.
+> **Backend Service for EduGenAI with Stable Diffusion XL (SDXL) Integration**  
+> Built with Node.js, Express.js, and HTTP communication to an external Python SDXL inference service (Google Colab, RunPod, or local GPU server).
 
-EcoGen AI enables purpose-aware image generation where users can choose between an energy-efficient **Eco Mode** (lower computational effort) and a **High Quality Mode** (maximum computational effort). For every generation, the system transparently calculates and reports estimated energy consumption, computational savings, and estimated carbon emissions against a maximum-quality baseline.
+EduGenAI enables purpose-aware, energy-conscious AI image generation. Users can select between an **Economy** condition (fewer inference steps, lower computational workload) and a **High Quality** condition (full inference steps for detailed educational visuals). The system provides transparent estimates of relative compute units, energy savings, and carbon metrics alongside actual GPU performance measurements.
 
 ---
 
-## 1. Backend Folder Structure
+## 1. Backend Architecture & Folder Structure
 
 ```
 backend/
-├── package.json                   # Project metadata and dependencies
-├── server.js                      # Express server entry point, CORS & routes
-├── .env.example                   # Template for environment configuration
-├── .env                           # Local environment secrets (ignored by Git)
+├── package.json                   # Project metadata and dependencies (Express, Axios, CORS, dotenv)
+├── server.js                      # Express server entry point, CORS, and route mounting
+├── .env.example                   # Environment configuration template
+├── .env                           # Active environment settings (ignored by Git)
 ├── .gitignore                     # Git ignore rules for node_modules and .env
-├── README.md                      # Complete setup, testing, and API documentation
+├── README.md                      # Complete installation, SDXL setup, and API guide
 ├── routes/
-│   └── generationRoutes.js        # Express route definitions (/api/*)
+│   └── generationRoutes.js        # Route endpoints (/api/generate, /api/health, etc.)
 ├── controllers/
-│   └── generationController.js    # Endpoint handlers & business logic
+│   └── generationController.js    # Request handlers & orchestration
 ├── services/
-│   ├── imageGenerationService.js  # Real AI provider integration (OpenAI, HuggingFace, Pollinations)
-│   ├── resourceEstimationService.js # Configurable energy & carbon estimation logic
-│   └── historyService.js          # File-based persistent generation logging
+│   ├── generationPolicyService.js # Condition-based policies, step allocation & compute savings
+│   ├── modelService.js            # HTTP client for Python SDXL inference service
+│   └── historyService.js          # Persistent disk-backed generation log store
+├── utils/
+│   └── validateGenerationRequest.js # Request payload validation middleware
 ├── middleware/
-│   ├── errorHandler.js            # Centralized error & 404 handler
-│   ├── validateRequest.js         # Input validation for prompts and quality tiers
-│   └── rateLimiter.js             # Rate limiter to protect provider quotas
-└── data/
-    └── history.json               # Persistent record store (auto-initialized)
+│   ├── errorHandler.js            # Centralized error handler (no fake responses)
+│   └── rateLimiter.js             # Rate limiter to protect GPU workloads
+├── data/
+│   └── history.json               # Persistent record store
+└── model-service/
+    └── sdxl_server.py             # Ready-to-run Python/FastAPI SDXL inference server (for Colab / local GPU)
 ```
 
 ---
 
-## 2. Installation Instructions
+## 2. Prerequisites & Installation
 
 ### Prerequisites
 - **Node.js**: v18.0.0 or higher (v20+ or v24 recommended)
 - **npm**: v9.0.0 or higher
+- **Python 3.10+ with CUDA GPU** (in Google Colab, RunPod, or local machine) for the SDXL model service
 
-### Steps
+### Installation Steps
 
-1. Open your terminal in VS Code.
-2. Navigate into the `backend` directory:
+1. Open your VS Code terminal and navigate into the `backend` directory:
    ```bash
    cd backend
    ```
-3. Install the dependencies:
+2. Install the dependencies:
    ```bash
    npm install
    ```
@@ -57,151 +60,170 @@ backend/
 
 ## 3. Environment Configuration
 
-1. Copy the example configuration to `.env`:
+1. Create your local `.env` from `.env.example`:
    ```bash
-   cp .env.example .env
+   copy .env.example .env
    ```
-   *(On Windows Command Prompt: `copy .env.example .env`)*
-
-2. Open `backend/.env` and review the settings:
+2. Open `backend/.env` and review the configuration:
 
 ```ini
-# Server Settings
+# Server Configuration
 PORT=5000
 NODE_ENV=development
 
-# Allowed Frontend URL (CORS origin)
+# Allowed Frontend Origin (for CORS)
 FRONTEND_URL=http://localhost:5173
 
-# AI Provider (Options: openai, huggingface, pollinations)
-IMAGE_PROVIDER=openai
+# External Python SDXL Model Inference Service Endpoint
+# Point this to your Google Colab tunnel (e.g., https://xxxx.ngrok-free.app/generate)
+# or local GPU server (http://localhost:8000/generate)
+SDXL_MODEL_ENDPOINT=http://localhost:8000/generate
 
-# Your Secret API Key (NEVER expose in frontend)
-IMAGE_API_KEY=your_openai_api_key_here
+# Optional Authentication Token if your model endpoint requires it
+SDXL_API_KEY=
 
-# Model identifier (optional, defaults automatically per provider)
-IMAGE_MODEL=dall-e-3
+# Inference Step Policies
+ECONOMY_STEPS=15
+HIGH_QUALITY_STEPS=50
 
-# Baseline Energy Values in Watt-hours (Illustrative estimates)
+# Illustrative Energy Baseline Values (Watt-hours)
 ECO_ENERGY_WH=0.5
 HIGH_ENERGY_WH=2.0
 
-# Carbon Intensity in g CO2e / kWh (World average baseline ~475)
+# Average Grid Carbon Intensity in grams CO2e per kWh (Global average baseline: ~475)
 GRID_CARBON_INTENSITY=475
 
-# Request Timeout (milliseconds)
-REQUEST_TIMEOUT_MS=60000
+# Request Timeout for Diffusion (in milliseconds, default: 90000ms / 90s)
+REQUEST_TIMEOUT_MS=90000
 
 # Rate Limiting
 RATE_LIMIT_MAX=30
 RATE_LIMIT_WINDOW_MS=900000
 ```
 
-### Supported AI Image Providers
+---
 
-| Provider | `IMAGE_PROVIDER` | `IMAGE_API_KEY` Format | Quality Differentiation Method |
-| :--- | :--- | :--- | :--- |
-| **OpenAI (Default)** | `openai` | `sk-...` from [OpenAI Platform](https://platform.openai.com) | DALL-E 3 (`standard` vs `hd`) or DALL-E 2 (`512x512` vs `1024x1024`) |
-| **Hugging Face** | `huggingface` | `hf_...` from [HF Settings](https://huggingface.co/settings/tokens) | FLUX / SDXL inference steps (15 vs 40 steps, 512px vs 1024px) |
-| **Pollinations** | `pollinations` | *(Leave blank - free open AI service)* | Model architecture (`turbo` vs `flux`) and resolution (512px vs 1024px) |
+## 4. Setting Up the SDXL Model Service (Google Colab or Local GPU)
 
-> [!NOTE]
-> If `IMAGE_API_KEY` is not provided and you use `openai` or `huggingface`, the backend returns a clear HTTP 503 error explaining how to configure it. It will **never** claim an image was generated when generation fails.
-> To test real image generation immediately without a paid API key, you can set `IMAGE_PROVIDER=pollinations`.
+The backend connects via HTTP to an external Python-based SDXL pipeline. A complete, high-performance FastAPI server is provided at [`backend/model-service/sdxl_server.py`](file:///d:/srisakthibackend/backend/model-service/sdxl_server.py).
+
+### Running in Google Colab (Free or Pro GPU)
+
+1. Open a new notebook in [Google Colab](https://colab.research.google.com) with **GPU Hardware Accelerator** enabled (`Runtime -> Change runtime type -> T4 GPU` or `A100`).
+2. Run the following cell in Colab:
+
+```python
+# 1. Install dependencies
+!pip install -q fastapi uvicorn diffusers transformers accelerate torch pyngrok
+
+# 2. Upload or write backend/model-service/sdxl_server.py into Colab
+# 3. Expose via ngrok:
+from pyngrok import ngrok
+ngrok.set_auth_token("YOUR_NGROK_AUTHTOKEN")
+public_url = ngrok.connect(8000).public_url
+print("SDXL Public Endpoint:", f"{public_url}/generate")
+
+# 4. Start the server
+!python sdxl_server.py
+```
+
+3. Copy the generated `https://xxxx.ngrok-free.app/generate` URL and paste it into `backend/.env` as:
+   ```ini
+   SDXL_MODEL_ENDPOINT=https://xxxx.ngrok-free.app/generate
+   ```
 
 ---
 
-## 4. Starting the Backend Server
+## 5. Starting the Express Backend
 
-From inside the `backend` directory:
+In your VS Code terminal:
 
-- **Standard Start**:
-  ```bash
-  npm start
-  ```
-- **Development Mode with Auto-Reload** (Node --watch):
-  ```bash
-  npm run dev
-  ```
+```bash
+cd backend
+
+# Option 1: Standard start
+npm start
+
+# Option 2: Development mode with auto-reload
+npm run dev
+```
 
 You should see:
 ```text
 ====================================================
-🌱 EcoGen AI Backend Server is running!
+🎓 EduGenAI Backend Server is running!
 📡 URL: http://localhost:5000
 🔗 Allowed Frontend Origin: http://localhost:5173
-🤖 Active Image Provider: openai
-⚡ Eco Baseline: 0.5 Wh | High Baseline: 2.0 Wh
+🤖 SDXL Model Endpoint: http://localhost:8000/generate
+⚡ Economy Steps: 15 | High Quality Steps: 50
 🩺 Health check: http://localhost:5000/api/health
 ====================================================
 ```
 
 ---
 
-## 5. API Reference & Testing
+## 6. API Reference
 
 ### 1. Health Check
 - **Endpoint**: `GET http://localhost:5000/api/health`
-- **Purpose**: Verify backend operational status.
-- **cURL / PowerShell**:
-  ```bash
-  curl http://localhost:5000/api/health
-  ```
-- **Response**:
+- **Output**:
   ```json
   {
     "success": true,
     "status": "healthy",
-    "message": "EcoGen AI backend is operational and ready to serve requests.",
-    "uptimeSeconds": 42,
-    "timestamp": "2026-10-10T13:45:00.000Z",
+    "service": "EduGenAI Backend",
+    "uptimeSeconds": 24,
+    "timestamp": "2026-10-10T15:45:00.000Z",
     "environment": "development",
-    "activeProvider": "openai"
+    "modelService": {
+      "endpoint": "http://localhost:8000/generate",
+      "status": "online"
+    }
   }
   ```
 
 ---
 
-### 2. Available Quality Tiers
-- **Endpoint**: `GET http://localhost:5000/api/quality-tiers`
-- **Purpose**: Retrieve tier specifications, estimated energy consumption, and savings baselines.
-- **cURL / PowerShell**:
-  ```bash
-  curl http://localhost:5000/api/quality-tiers
-  ```
-- **Response**:
+### 2. Available Conditions & Baselines
+- **Endpoint**: `GET http://localhost:5000/api/conditions` (or `/api/quality-tiers`)
+- **Output**:
   ```json
   {
     "success": true,
-    "qualityTiers": [
+    "conditions": [
       {
-        "id": "eco",
-        "name": "Eco Mode",
-        "description": "Optimized for energy efficiency using fewer inference steps and reduced computational overhead.",
+        "id": "economy",
+        "name": "Economy Mode",
+        "description": "Optimized for sustainability and speed using fewer inference steps to reduce computational effort.",
+        "inferenceSteps": 15,
         "computationalEffort": "low",
+        "relativeComputeUnits": 15,
+        "relativeComputeSavedUnits": 35,
+        "relativeComputeSavingsPercentage": 70,
         "estimatedEnergyWh": 0.5,
         "energySavedWh": 1.5,
         "energySavedPercentage": 75,
-        "estimatedCarbonEmissionsGCO2e": 0.238,
-        "isBaseline": false
+        "estimatedCarbonGCO2e": 0.238
       },
       {
-        "id": "high",
+        "id": "high_quality",
         "name": "High Quality Mode",
-        "description": "Maximum visual fidelity and resolution using full computational effort.",
+        "description": "Maximum visual detail and fidelity using full inference steps.",
+        "inferenceSteps": 50,
         "computationalEffort": "high",
-        "estimatedEnergyWh": 2.0,
+        "relativeComputeUnits": 50,
+        "relativeComputeSavedUnits": 0,
+        "relativeComputeSavingsPercentage": 0,
+        "estimatedEnergyWh": 2,
         "energySavedWh": 0,
         "energySavedPercentage": 0,
-        "estimatedCarbonEmissionsGCO2e": 0.95,
-        "isBaseline": true
+        "estimatedCarbonGCO2e": 0.95
       }
     ],
     "baseline": {
-      "highQualityBaselineEnergyWh": 2.0,
-      "gridCarbonIntensityGPerKwh": 475,
-      "estimated": true,
-      "disclaimer": "Resource values are illustrative estimates based on configurable models and are not direct hardware measurements."
+      "highQualityBaselineSteps": 50,
+      "highQualityBaselineEnergyWh": 2,
+      "disclaimer": "Compute units and energy values are model-based comparative estimates. Reducing inference steps reduces GPU compute workload, but actual physical electricity consumption depends on runtime hardware and data center infrastructure."
     }
   }
   ```
@@ -209,62 +231,88 @@ You should see:
 ---
 
 ### 3. Generate Image
-- **Endpoint**: `POST http://localhost:5000/api/generate`
+- **Endpoint**: `POST http://localhost:5000/api/generate` (also aliases `/api/generation/create`)
 - **Headers**: `Content-Type: application/json`
 - **Body**:
   ```json
   {
-    "prompt": "A serene solar-powered glass house in a green valley",
-    "quality": "eco"
+    "prompt": "A scientific illustration of the solar system",
+    "category": "education",
+    "constraints": [
+      "dark background",
+      "no text"
+    ],
+    "condition": "economy",
+    "settings": {
+      "width": 1024,
+      "height": 1024,
+      "guidanceScale": 5.0,
+      "seed": 42
+    }
   }
   ```
-- **cURL**:
-  ```bash
-  curl -X POST http://localhost:5000/api/generate \
-    -H "Content-Type: application/json" \
-    -d "{\"prompt\":\"A serene solar-powered glass house in a green valley\",\"quality\":\"eco\"}"
-  ```
+
 - **Successful Response (HTTP 200)**:
   ```json
   {
     "success": true,
     "image": {
-      "url": "https://oaidalleapiprodscus.blob.core.windows.net/private/org-xxx/..."
+      "url": "data:image/jpeg;base64,/9j/4AAQSkZJRg..."
     },
-    "quality": "eco",
-    "resources": {
-      "energyWh": 0.5,
-      "estimated": true,
+    "condition": "economy",
+    "category": "education",
+    "policy": {
+      "inferenceSteps": 15,
       "computationalEffort": "low",
+      "relativeComputeUnits": 15,
+      "relativeComputeSavedUnits": 35,
+      "relativeComputeSavingsPercentage": 70,
+      "estimatedEnergyWh": 0.5,
       "energySavedWh": 1.5,
       "energySavedPercentage": 75,
-      "carbonEmissionsGramsCO2e": 0.238
+      "estimatedCarbonEmissionsGCO2e": 0.238,
+      "isEstimated": true,
+      "disclaimer": "Compute units and energy values are model-based comparative estimates. Reducing inference steps reduces computational effort, but actual physical electricity consumption depends on specific server hardware and data center infrastructure."
     },
-    "message": "Image generated successfully. Resource values are illustrative estimates."
+    "measurements": {
+      "measuredInferenceTimeSeconds": 2.45,
+      "device": "NVIDIA A100-SXM4-40GB",
+      "actualSteps": 15,
+      "memoryAllocatedMb": 7420.5
+    },
+    "message": "Image generated successfully via SDXL pipeline."
   }
   ```
 
-- **Missing API Key Response (HTTP 503)**:
+- **Model Service Unavailable Response (HTTP 503)**:
+  *Returned when the Python SDXL Colab/local service is offline (no fake images generated!):*
   ```json
   {
     "success": false,
     "error": {
-      "code": "API_KEY_NOT_CONFIGURED",
-      "provider": "openai",
-      "message": "OpenAI API key is missing. Please add your OpenAI API key (sk-...) to IMAGE_API_KEY in backend/.env to generate images.",
-      "guide": "To fix this:\n1. Open backend/.env\n2. Set IMAGE_PROVIDER=openai\n3. Set IMAGE_API_KEY=<your_openai_api_key>\n4. Restart the backend server."
+      "code": "MODEL_SERVICE_UNAVAILABLE",
+      "message": "Cannot connect to SDXL model service at \"http://localhost:8000/generate\". Please verify that your Python/Google Colab SDXL inference server is running and accessible.",
+      "details": {
+        "endpoint": "http://localhost:8000/generate",
+        "solution": "Start your SDXL inference service (e.g. running the provided Colab script) and update SDXL_MODEL_ENDPOINT in backend/.env"
+      }
     }
   }
   ```
 
-- **Validation Failure Response (HTTP 400)**:
+- **Validation Error Response (HTTP 400)**:
   ```json
   {
     "success": false,
     "error": {
       "code": "VALIDATION_ERROR",
-      "field": "prompt",
-      "message": "The \"prompt\" field cannot be empty."
+      "message": "Request payload validation failed.",
+      "details": [
+        {
+          "field": "prompt",
+          "message": "Prompt cannot be empty after trimming."
+        }
+      ]
     }
   }
   ```
@@ -272,135 +320,26 @@ You should see:
 ---
 
 ### 4. Generation History
-- **Endpoint**: `GET http://localhost:5000/api/history?limit=10&offset=0`
-- **Purpose**: Retrieve historical generations, prompts, images, and resource estimates.
-- **cURL / PowerShell**:
-  ```bash
-  curl http://localhost:5000/api/history
-  ```
-- **Response**:
-  ```json
-  {
-    "success": true,
-    "total": 1,
-    "limit": 20,
-    "offset": 0,
-    "hasMore": false,
-    "history": [
-      {
-        "id": "gen_88f9a3f2-1d74-4ec2-a279-7f3c64c48972",
-        "prompt": "A serene solar-powered glass house in a green valley",
-        "quality": "eco",
-        "image": {
-          "url": "https://..."
-        },
-        "resources": {
-          "energyWh": 0.5,
-          "estimated": true,
-          "computationalEffort": "low",
-          "energySavedWh": 1.5,
-          "energySavedPercentage": 75,
-          "carbonEmissionsGramsCO2e": 0.238
-        },
-        "provider": "openai",
-        "model": "dall-e-3",
-        "createdAt": "2026-10-10T13:46:12.314Z"
-      }
-    ],
-    "storageType": "persistent_json_file"
-  }
-  ```
+- **Endpoint**: `GET http://localhost:5000/api/history` (or `/api/generation/history`)
+- **Query Parameters**:
+  - `limit`: number (default: 20)
+  - `offset`: number (default: 0)
+  - `search`: search term for prompt or title
+  - `category`: worksheet | poster | flashcard | illustration
 
 ---
 
-## 6. How to Connect Your React Frontend
+## 7. Connecting Your Existing React Frontend
 
-Your React frontend does **not** need any modification to its UI components. Simply direct your API calls to `http://localhost:5000/api` using standard `fetch()` or `axios`.
+Your existing React frontend communicates with the backend via the `apiClient` defined in `src/services/api.js`.
 
-### Example 1: Generate Image (`POST /api/generate`)
-```javascript
-async function generateEcoImage(promptText, selectedQualityTier) {
-  try {
-    const response = await fetch('http://localhost:5000/api/generate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        prompt: promptText,
-        quality: selectedQualityTier // "eco" or "high"
-      })
-    });
-
-    const data = await response.json();
-
-    if (!data.success) {
-      // Display user-friendly error from backend
-      console.error('Generation failed:', data.error.message);
-      alert(`Error: ${data.error.message}`);
-      return null;
-    }
-
-    // Access the generated image and resource metrics:
-    const imageUrl = data.image.url;
-    const energyUsed = data.resources.energyWh; // e.g. 0.5 Wh
-    const energySaved = data.resources.energySavedWh; // e.g. 1.5 Wh
-    const percentSaved = data.resources.energySavedPercentage; // e.g. 75%
-    const carbonEmitted = data.resources.carbonEmissionsGramsCO2e; // e.g. 0.238 g
-
-    console.log(`Image ready! Saved ${energySaved} Wh (${percentSaved}% energy saved)`);
-    return data;
-  } catch (networkErr) {
-    console.error('Could not connect to backend server:', networkErr);
-  }
-}
-```
-
-### Example 2: Fetch Quality Tiers (`GET /api/quality-tiers`)
-```javascript
-async function loadQualityTiers() {
-  const response = await fetch('http://localhost:5000/api/quality-tiers');
-  const data = await response.json();
-  if (data.success) {
-    return data.qualityTiers;
-  }
-}
-```
-
-### Example 3: Fetch History (`GET /api/history`)
-```javascript
-async function loadGenerationHistory() {
-  const response = await fetch('http://localhost:5000/api/history?limit=20');
-  const data = await response.json();
-  if (data.success) {
-    return data.history;
-  }
-}
-```
-
----
-
-## 7. Resource & Energy Calculation Model
-
-The backend uses a transparent, defensible estimation formula:
-
-1. **High Quality Baseline ($E_{\text{high}}$)**:
-   - Configured via `HIGH_ENERGY_WH` (Default: $2.0\text{ Wh}$).
-2. **Selected Mode Energy ($E_{\text{selected}}$)**:
-   - For **Eco Mode**: $0.5\text{ Wh}$ (from `ECO_ENERGY_WH`).
-   - For **High Quality Mode**: $2.0\text{ Wh}$.
-3. **Energy Saved**:
-   $$\text{Energy Saved (Wh)} = \max(0, E_{\text{high}} - E_{\text{selected}})$$
-   - Eco Mode: $2.0 - 0.5 = 1.5\text{ Wh}$
-   - High Quality Mode: $2.0 - 2.0 = 0.0\text{ Wh}$
-4. **Percentage of Energy Saved**:
-   $$\text{Energy Saved (\%)} = \left(\frac{\text{Energy Saved}}{E_{\text{high}}}\right) \times 100$$
-   - Eco Mode: $\left(\frac{1.5}{2.0}\right) \times 100 = 75.0\%$
-   - High Quality Mode: $0.0\%$
-5. **Estimated Carbon Emissions ($C$)**:
-   $$C = \left(\frac{E_{\text{selected}}}{1000}\right) \times \text{Grid Carbon Intensity (g CO}_2\text{e/kWh)}$$
-   Using the global standard grid factor of $475\text{ g CO}_2\text{e/kWh}$:
-   - Eco: $\left(\frac{0.5}{1000}\right) \times 475 = 0.238\text{ g CO}_2\text{e}$
-   - High: $\left(\frac{2.0}{1000}\right) \times 475 = 0.950\text{ g CO}_2\text{e}$
-
-> **Disclaimer**: All energy and carbon figures generated are model-based illustrative estimates for comparative and educational awareness, not direct hardware-level electricity meter readings.
+To connect:
+1. Ensure your frontend `.env` (or default fallback) points to:
+   ```ini
+   REACT_APP_API_BASE_URL=http://localhost:5000/api
+   ```
+2. The backend provides full native routing support for:
+   - `/api/generation/create` (used by `GenerationStudioPage.jsx`)
+   - `/api/generation/history` (used by `HistoryPage.jsx`)
+   - `/api/models`, `/api/rules`, `/api/budget/summary`, `/api/analytics`
+   - `/api/auth/login`, `/api/auth/signup`

@@ -1,115 +1,174 @@
 /**
- * EcoGen AI - Generation Controller
+ * EduGenAI - Generation Controller
  * 
- * Handles HTTP requests for:
- * - GET  /api/health
- * - GET  /api/quality-tiers
- * - POST /api/generate
- * - GET  /api/history
+ * Orchestrates request validation, energy-aware generation policy selection,
+ * SDXL model invocation, and history persistence.
  */
 
-const {
-  calculateResourceEstimates,
-  getQualityTiers: fetchQualityTiers,
-  normalizeQuality
-} = require('../services/resourceEstimationService');
-
-const {
-  generateImage: requestImageGeneration
-} = require('../services/imageGenerationService');
-
-const {
-  saveRecord,
-  getHistory: fetchHistory
-} = require('../services/historyService');
+const { selectPolicy } = require('../services/generationPolicyService');
+const { invokeSdxlModel, checkModelServiceHealth } = require('../services/modelService');
+const { saveRecord, getHistory: fetchHistory, deleteRecord } = require('../services/historyService');
 
 /**
  * Health check endpoint
  * GET /api/health
  */
-function healthCheck(req, res) {
+async function healthCheck(req, res) {
+  const modelHealth = await checkModelServiceHealth();
+
   res.status(200).json({
     success: true,
     status: 'healthy',
-    message: 'EcoGen AI backend is operational and ready to serve requests.',
+    service: 'EduGenAI Backend',
     uptimeSeconds: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
-    activeProvider: process.env.IMAGE_PROVIDER || 'openai'
+    modelService: {
+      endpoint: process.env.SDXL_MODEL_ENDPOINT || 'http://localhost:8000/generate',
+      status: modelHealth.status
+    }
   });
 }
 
 /**
- * Quality tiers and resource baseline endpoint
- * GET /api/quality-tiers
+ * Available conditions and resource baselines endpoint
+ * GET /api/quality-tiers or GET /api/conditions
  */
-function getQualityTiers(req, res) {
-  const tiersData = fetchQualityTiers();
-  res.status(200).json(tiersData);
+function getConditions(req, res) {
+  const economySteps = parseInt(process.env.ECONOMY_STEPS, 10) || 15;
+  const highQualitySteps = parseInt(process.env.HIGH_QUALITY_STEPS, 10) || 50;
+  const ecoEnergyWh = parseFloat(process.env.ECO_ENERGY_WH) || 0.5;
+  const highEnergyWh = parseFloat(process.env.HIGH_ENERGY_WH) || 2.0;
+  const gridCarbonIntensity = parseFloat(process.env.GRID_CARBON_INTENSITY) || 475;
+
+  const ecoSavingsWh = parseFloat(Math.max(0, highEnergyWh - ecoEnergyWh).toFixed(3));
+  const ecoSavingsPercent = highEnergyWh > 0 ? parseFloat(((ecoSavingsWh / highEnergyWh) * 100).toFixed(1)) : 0;
+
+  res.status(200).json({
+    success: true,
+    conditions: [
+      {
+        id: 'economy',
+        name: 'Economy Mode',
+        description: 'Optimized for sustainability and speed using fewer inference steps to reduce computational effort.',
+        inferenceSteps: economySteps,
+        computationalEffort: 'low',
+        relativeComputeUnits: economySteps,
+        relativeComputeSavedUnits: highQualitySteps - economySteps,
+        relativeComputeSavingsPercentage: highQualitySteps > 0 ? ((highQualitySteps - economySteps) / highQualitySteps) * 100 : 0,
+        estimatedEnergyWh: ecoEnergyWh,
+        energySavedWh: ecoSavingsWh,
+        energySavedPercentage: ecoSavingsPercent,
+        estimatedCarbonGCO2e: parseFloat(((ecoEnergyWh / 1000) * gridCarbonIntensity).toFixed(3))
+      },
+      {
+        id: 'high_quality',
+        name: 'High Quality Mode',
+        description: 'Maximum visual detail and fidelity using full inference steps.',
+        inferenceSteps: highQualitySteps,
+        computationalEffort: 'high',
+        relativeComputeUnits: highQualitySteps,
+        relativeComputeSavedUnits: 0,
+        relativeComputeSavingsPercentage: 0,
+        estimatedEnergyWh: highEnergyWh,
+        energySavedWh: 0,
+        energySavedPercentage: 0,
+        estimatedCarbonGCO2e: parseFloat(((highEnergyWh / 1000) * gridCarbonIntensity).toFixed(3))
+      }
+    ],
+    baseline: {
+      highQualityBaselineSteps: highQualitySteps,
+      highQualityBaselineEnergyWh: highEnergyWh,
+      disclaimer: 'Compute units and energy values are model-based comparative estimates. Reducing inference steps reduces GPU compute workload, but actual physical electricity consumption depends on runtime hardware and data center infrastructure.'
+    }
+  });
 }
 
 /**
- * Image generation and resource estimation endpoint
- * POST /api/generate
+ * Image generation endpoint
+ * POST /api/generate and POST /api/generation/create
  */
 async function generate(req, res, next) {
   try {
-    const { prompt, quality = 'eco' } = req.body;
-    const normalizedQuality = normalizeQuality(quality);
+    const payload = req.validatedData || req.body;
+    const { prompt, category, constraints, condition, settings } = payload;
 
-    // 1. Calculate resource consumption and savings estimates
-    const resourceEstimates = calculateResourceEstimates(normalizedQuality);
-
-    // 2. Generate actual image via selected provider
-    // Note: If no API key is configured or generation fails, this throws
-    // and is caught without returning fake success responses
-    const generationResult = await requestImageGeneration(prompt, normalizedQuality);
-
-    // 3. Persist record to history
-    saveRecord({
-      prompt,
-      quality: normalizedQuality,
-      image: { url: generationResult.url },
-      resources: resourceEstimates,
-      provider: generationResult.provider,
-      model: generationResult.model
+    // 1. Select generation policy based on user condition
+    const policyDecision = selectPolicy(condition, category, constraints, {
+      ...settings,
+      prompt
     });
 
-    // 4. Return standard response format
+    // 2. Invoke the external SDXL Model Service via HTTP
+    // Will throw ModelServiceError if offline, timeout, or failed (no mock images!)
+    const modelResult = await invokeSdxlModel(policyDecision.modelParameters);
+
+    // 3. Persist record to history
+    const record = saveRecord({
+      prompt,
+      category,
+      constraints,
+      condition: policyDecision.condition,
+      image: modelResult.image,
+      policy: policyDecision.policy,
+      measurements: modelResult.measurements,
+      settings: policyDecision.modelParameters
+    });
+
+    // 4. Return response compatible with both API specification and React frontend
     return res.status(200).json({
       success: true,
       image: {
-        url: generationResult.url
+        url: modelResult.image.url
       },
-      quality: normalizedQuality,
-      resources: {
-        energyWh: resourceEstimates.energyWh,
-        estimated: true,
-        computationalEffort: resourceEstimates.computationalEffort,
-        energySavedWh: resourceEstimates.energySavedWh,
-        energySavedPercentage: resourceEstimates.energySavedPercentage,
-        carbonEmissionsGramsCO2e: resourceEstimates.carbonEmissionsGramsCO2e
+      condition: policyDecision.condition,
+      category: policyDecision.category,
+      policy: policyDecision.policy,
+      measurements: modelResult.measurements,
+      data: {
+        id: record.id,
+        title: prompt.length > 40 ? prompt.substring(0, 40) + '...' : prompt,
+        prompt,
+        category: category || 'worksheet',
+        gradeLevel: req.body.gradeLevel || 'Standard Curriculum',
+        modelUsed: `SDXL (${policyDecision.condition === 'economy' ? 'Eco' : 'HQ'})`,
+        status: 'completed',
+        downloadUrl: modelResult.image.url,
+        dimensions: `${policyDecision.modelParameters.width} x ${policyDecision.modelParameters.height}`,
+        createdAt: record.createdAt,
+        resources: policyDecision.policy
       },
-      message: 'Image generated successfully. Resource values are illustrative estimates.'
+      message: 'Image generated successfully via SDXL pipeline.'
     });
-  } catch (error) {
-    next(error);
+  } catch (err) {
+    next(err);
   }
 }
 
 /**
- * Generation history endpoint
- * GET /api/history
+ * History endpoint
+ * GET /api/history and GET /api/generation/history
  */
 function getHistory(req, res) {
-  const { limit, offset } = req.query;
-  const historyData = fetchHistory(limit, offset);
+  const { limit, offset, search, category, status } = req.query;
+  const historyData = fetchHistory({ limit, offset, search, category, status });
   res.status(200).json(historyData);
+}
+
+/**
+ * Delete generation record endpoint
+ * DELETE /api/generation/:id
+ */
+function deleteGeneration(req, res) {
+  const { id } = req.params;
+  const deleted = deleteRecord(id);
+  res.status(200).json({ success: true, deleted });
 }
 
 module.exports = {
   healthCheck,
-  getQualityTiers,
+  getConditions,
   generate,
-  getHistory
+  getHistory,
+  deleteGeneration
 };

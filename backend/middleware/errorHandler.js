@@ -1,12 +1,11 @@
 /**
- * EcoGen AI - Centralized Error Handling Middleware
+ * EduGenAI - Centralized Error Handling Middleware
  * 
- * Intercepts all unhandled errors, formats consistent JSON responses,
- * and ensures sensitive credentials are never leaked.
+ * Intercepts unhandled errors, formats consistent JSON responses,
+ * and handles model service unavailability cleanly without fake claims.
  */
 
 function errorHandler(err, req, res, next) {
-  // Log server-side diagnostic information
   console.error(`[Error] [${req.method} ${req.url}] ${err.name}: ${err.message}`);
 
   // Handle invalid JSON body syntax
@@ -20,38 +19,14 @@ function errorHandler(err, req, res, next) {
     });
   }
 
-  // Handle Missing API Key error
-  if (err.name === 'ApiKeyMissingError') {
+  // Handle Model Service Error (e.g. SDXL Colab offline, connection refused, timeout)
+  if (err.name === 'ModelServiceError') {
     return res.status(err.statusCode || 503).json({
       success: false,
       error: {
-        code: 'API_KEY_NOT_CONFIGURED',
-        provider: err.provider,
+        code: 'MODEL_SERVICE_UNAVAILABLE',
         message: err.message,
-        guide: err.guide
-      }
-    });
-  }
-
-  // Handle Provider-specific generation failure
-  if (err.name === 'GenerationProviderError') {
-    return res.status(err.statusCode || 502).json({
-      success: false,
-      error: {
-        code: 'IMAGE_GENERATION_FAILED',
-        message: err.message,
-        details: err.providerDetails || undefined
-      }
-    });
-  }
-
-  // Handle CORS Forbidden error
-  if (err.message && err.message.includes('CORS')) {
-    return res.status(403).json({
-      success: false,
-      error: {
-        code: 'CORS_FORBIDDEN',
-        message: err.message
+        details: err.details || undefined
       }
     });
   }
@@ -73,7 +48,7 @@ function errorHandler(err, req, res, next) {
   });
 }
 
-// 404 Not Found fallback for unmatched routes
+// 404 Handler for unmatched routes
 function notFoundHandler(req, res) {
   res.status(404).json({
     success: false,
