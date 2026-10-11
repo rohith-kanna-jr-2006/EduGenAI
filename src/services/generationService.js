@@ -234,50 +234,10 @@ let mockModels = [
 
 export const generationService = {
   // Generation Studio Execution
+  // Generation Studio Execution - calls real backend and propagates real errors
   async generateVisual(params) {
-    try {
-      const response = await apiClient.post('/generation/create', params);
-      return response.data;
-    } catch (err) {
-      console.warn('Backend /generation/create unavailable. Emulating via educational engine fallback.');
-      // Simulate real-world 1.5s generation delay
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-
-      const newGen = {
-        id: 'gen_' + Date.now().toString(36),
-        title: params.prompt.length > 40 ? params.prompt.substring(0, 40) + '...' : params.prompt,
-        prompt: params.prompt,
-        category: params.category || 'worksheet',
-        categoryLabel:
-          params.category === 'worksheet'
-            ? 'Colouring Worksheet'
-            : params.category === 'flashcard'
-            ? 'Flashcards & Vocab'
-            : params.category === 'poster'
-            ? 'Educational Poster'
-            : 'Learning Illustration',
-        gradeLevel: params.gradeLevel || 'Grade 5 (Elementary)',
-        modelUsed:
-          params.modelMode === 'manual' && params.selectedModel
-            ? params.selectedModel
-            : 'Imagen 3 Fast (Smart Routed)',
-        modelId: params.modelMode === 'manual' ? params.selectedModelId : 'imagen-3-fast',
-        status: 'completed',
-        qualityScore: 97,
-        reviewStatus: 'approved',
-        tokensUsed: Math.floor(Math.random() * 80) + 110,
-        cost: 0.0034,
-        dimensions: params.aspectRatio === '16:9' ? '1920 x 1080' : '2048 x 2048',
-        aspectRatio: params.aspectRatio || '1:1',
-        createdAt: new Date().toISOString(),
-        guardrailStatus: 'K-5 Safe',
-        downloadUrl: '#',
-        sampleColor: 'bg-brand-tint text-brand',
-      };
-
-      mockGenerations.unshift(newGen);
-      return { success: true, data: newGen };
-    }
+    const response = await apiClient.post('/generation/create', params);
+    return response.data;
   },
 
   // Generation History

@@ -24,7 +24,7 @@ export const ModelLibraryPage = () => {
     async function load() {
       try {
         const res = await generationService.getModels();
-        setModels(res.models);
+        setModels(Array.isArray(res?.models) ? res.models : []);
       } finally {
         setLoading(false);
       }

@@ -14,6 +14,7 @@ const generateLimiter = rateLimit({
   max: maxRequests,
   standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
   legacyHeaders: false,  // Disable `X-RateLimit-*` headers
+  validate: false,       // Suppress proxy header validation warnings in hosted proxy environments
   statusCode: 429,
   handler: (req, res) => {
     res.status(429).json({

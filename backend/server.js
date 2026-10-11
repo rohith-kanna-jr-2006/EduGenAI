@@ -9,7 +9,8 @@ const cors = require('cors');
 const path = require('path');
 const dotenv = require('dotenv');
 
-// Load environment variables from backend/.env
+// Load environment variables from .env and backend/.env
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 dotenv.config({ path: path.join(__dirname, '.env') });
 
 const generationRoutes = require('./routes/generationRoutes');

@@ -46,6 +46,36 @@ router.get('/models', (req, res) => {
   res.status(200).json({
     models: [
       {
+        id: 'gemini-3.1-flash-lite',
+        name: 'Gemini 3.1 Flash (Curriculum Visual Engine)',
+        provider: 'Google AI Studio',
+        specialty: 'High-speed educational diagrams, worksheet line-art, and chart generation',
+        latency: '1.8s avg',
+        costPerImage: 'Free (AI Studio Key)',
+        status: 'operational',
+        rating: '99.8% K-12 Safe'
+      },
+      {
+        id: 'gemini-3.1-flash-lite-image',
+        name: 'Gemini 3.1 Flash Lite Image',
+        provider: 'Google AI Studio',
+        specialty: 'Multimodal raster image generation with customizable aspect ratios',
+        latency: '2.5s avg',
+        costPerImage: 'Google Cloud / AI Studio',
+        status: 'operational',
+        rating: '99.5% K-12 Safe'
+      },
+      {
+        id: 'gemini-nano-banana-2.1',
+        name: 'Gemini Nano Banana 2.1 (High Quality)',
+        provider: 'Google AI Studio',
+        specialty: 'High-resolution multimodal visual synthesis and diagram rendering',
+        latency: '3.5s avg',
+        costPerImage: 'Google Cloud / AI Studio',
+        status: 'operational',
+        rating: '99.7% K-12 Safe'
+      },
+      {
         id: 'sdxl-turbo',
         name: 'SDXL Turbo Education',
         provider: 'Stability AI / Edu Fine-tune',
@@ -135,9 +165,21 @@ router.get('/analytics', (req, res) => {
   });
 });
 
+const { getHistory: fetchHistory, updateRecord } = require('../services/historyService');
+
 // GET & PATCH /api/quality/reviews - Quality reviews
 router.get('/quality/reviews', (req, res) => {
-  res.status(200).json({ pending: [], approved: [], total: 0 });
+  const historyData = fetchHistory();
+  const allItems = historyData.items || [];
+  const pending = allItems.filter((i) => i.reviewStatus === 'pending');
+  const approved = allItems.filter((i) => i.reviewStatus === 'approved');
+  res.status(200).json({ pending, approved, total: allItems.length });
+});
+
+router.patch('/quality/reviews/:id', (req, res) => {
+  const { status, feedback } = req.body;
+  const updated = updateRecord(req.params.id, { reviewStatus: status, reviewFeedback: feedback });
+  res.status(200).json({ success: true, item: updated });
 });
 
 // POST /api/auth/login & /api/auth/signup - Authentication

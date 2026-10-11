@@ -86,7 +86,7 @@ export const CostAnalyticsPage = () => {
             Total Incurred Spend
           </span>
           <div className="text-2xl font-bold text-ink-heading font-heading mt-1 tabular-nums">
-            ${data.totalSpendUSD.toFixed(2)}
+            ${(Number(data.totalSpendUSD) || 0).toFixed(2)}
           </div>
           <span className="text-xs text-status-success font-medium mt-1 block">
             Across 1,248 educational visuals
@@ -98,7 +98,7 @@ export const CostAnalyticsPage = () => {
             Average Cost / Visual
           </span>
           <div className="text-2xl font-bold text-brand font-heading mt-1 tabular-nums">
-            ${data.averageCostPerImage.toFixed(4)}
+            ${(Number(data.averageCostPerImage) || 0).toFixed(4)}
           </div>
           <span className="text-xs text-ink-muted mt-1 block">
             Optimized via prompt token pruning
@@ -149,7 +149,7 @@ export const CostAnalyticsPage = () => {
                       className="w-1/2 max-w-[28px] bg-brand rounded-t-sm relative group cursor-pointer transition-all hover:bg-brand-hover"
                     >
                       <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-ink-heading text-white text-[10px] py-1 px-1.5 rounded pointer-events-none whitespace-nowrap z-10">
-                        Spend: ${t.spend.toFixed(2)}
+                        Spend: ${(Number(t.spend) || 0).toFixed(2)}
                       </div>
                     </div>
 
@@ -159,7 +159,7 @@ export const CostAnalyticsPage = () => {
                       className="w-1/2 max-w-[28px] bg-emerald-400 rounded-t-sm relative group cursor-pointer transition-all hover:bg-emerald-500"
                     >
                       <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-ink-heading text-white text-[10px] py-1 px-1.5 rounded pointer-events-none whitespace-nowrap z-10">
-                        Saved: ${t.savings.toFixed(2)}
+                        Saved: ${(Number(t.savings) || 0).toFixed(2)}
                       </div>
                     </div>
                   </div>

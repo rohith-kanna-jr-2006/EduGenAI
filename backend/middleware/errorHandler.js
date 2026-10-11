@@ -14,8 +14,12 @@
  */
 
 function errorHandler(err, req, res, next) {
-  // Server-side diagnostic log
-  console.error(`[Error] [${req.method} ${req.url}] ${err.name || 'Error'}: ${err.message}`);
+  // Server-side diagnostic log: operational status codes (e.g. 401, 402, 429) log as warning
+  if (err.statusCode && err.statusCode < 500) {
+    console.warn(`[API Notice] [${req.method} ${req.url}] ${err.name || 'Notice'}: ${err.message}`);
+  } else {
+    console.error(`[Error] [${req.method} ${req.url}] ${err.name || 'Error'}: ${err.message}`);
+  }
 
   // Handle invalid JSON body syntax (HTTP 400)
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
@@ -24,6 +28,19 @@ function errorHandler(err, req, res, next) {
       error: {
         code: 'INVALID_JSON_BODY',
         message: 'Malformed JSON payload provided in request body.'
+      }
+    });
+  }
+
+  // Handle OpenRouter Error (HTTP 401, 502, 503, 504)
+  if (err.name === 'OpenRouterError') {
+    return res.status(err.statusCode || 502).json({
+      success: false,
+      error: {
+        code: err.statusCode === 504 ? 'GATEWAY_TIMEOUT' : err.statusCode === 503 ? 'OPENROUTER_SERVICE_UNAVAILABLE' : err.statusCode === 401 ? 'AUTHENTICATION_REQUIRED' : 'OPENROUTER_ERROR',
+        message: err.message,
+        statusCode: err.statusCode || 502,
+        details: err.details || undefined
       }
     });
   }

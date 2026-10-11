@@ -38,8 +38,13 @@ export const OverviewPage = () => {
           generationService.getHistory(),
           generationService.getBudgetSummary(),
         ]);
-        setHistory(historyRes.items.slice(0, 4));
-        setBudget(budgetRes);
+        const items = Array.isArray(historyRes?.items)
+          ? historyRes.items
+          : Array.isArray(historyRes?.history)
+            ? historyRes.history
+            : [];
+        setHistory(items.slice(0, 4));
+        setBudget(budgetRes || null);
       } catch (err) {
         console.error('Failed to load overview data', err);
       } finally {
@@ -234,11 +239,18 @@ export const OverviewPage = () => {
               </div>
             ) : (
               <div className="divide-y divide-border">
-                {history.map((item) => {
-                  const FormatIcon = getFormatIcon(item.category);
+                {history.map((item, idx) => {
+                  const FormatIcon = getFormatIcon(item?.category);
+                  const costDisplay =
+                    item?.cost !== null && item?.cost !== undefined && !Number.isNaN(Number(item?.cost))
+                      ? `$${Number(item.cost).toFixed(4)}`
+                      : item?.modelUsed && item.modelUsed.toLowerCase().includes('sdxl')
+                        ? 'Self-hosted (SDXL)'
+                        : 'Local GPU';
+
                   return (
                     <div
-                      key={item.id}
+                      key={item?.id || `hist_${idx}`}
                       className="p-4 hover:bg-surface-hover/60 transition-colors flex items-center justify-between gap-4"
                     >
                       <div className="flex items-start gap-3 min-w-0">
@@ -247,33 +259,33 @@ export const OverviewPage = () => {
                         </div>
                         <div className="min-w-0">
                           <div className="text-sm font-semibold text-ink-heading truncate font-heading">
-                            {item.title}
+                            {item?.title || item?.prompt?.substring(0, 40) || 'Educational Visual'}
                           </div>
                           <div className="text-xs text-ink-muted truncate max-w-md mt-0.5">
-                            {item.prompt}
+                            {item?.prompt || 'No prompt specified'}
                           </div>
                           <div className="flex items-center gap-2 mt-1 text-[11px] text-ink-muted">
-                            <span className="font-medium text-brand">{item.categoryLabel}</span>
+                            <span className="font-medium text-brand">{item?.categoryLabel || 'Educational Material'}</span>
                             <span>•</span>
-                            <span>{item.gradeLevel}</span>
+                            <span>{item?.gradeLevel || 'Standard'}</span>
                             <span>•</span>
-                            <span className="tabular-nums">${item.cost.toFixed(4)}</span>
+                            <span className="tabular-nums">{costDisplay}</span>
                           </div>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <Badge
-                          variant={item.reviewStatus === 'approved' ? 'success' : 'warning'}
+                          variant={item?.reviewStatus === 'approved' ? 'success' : 'warning'}
                           dot
                         >
-                          {item.reviewStatus === 'approved' ? 'Approved' : 'In Review'}
+                          {item?.reviewStatus === 'approved' ? 'Approved' : 'In Review'}
                         </Badge>
                         <Button
                           variant="outline"
                           size="sm"
                           icon={Download}
-                          onClick={() => alert(`Downloading "${item.title}" high-resolution PDF.`)}
+                          onClick={() => alert(`Downloading "${item?.title || 'Visual'}" high-resolution PDF.`)}
                         >
                           PDF
                         </Button>

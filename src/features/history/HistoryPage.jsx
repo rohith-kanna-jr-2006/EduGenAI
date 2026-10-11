@@ -255,8 +255,14 @@ export const HistoryPage = () => {
                         {item.modelUsed}
                       </td>
                       <td className="py-3.5 px-4 tabular-nums">
-                        <div className="font-semibold text-ink-heading">${item.cost.toFixed(4)}</div>
-                        <div className="text-[11px] text-ink-muted">{item.tokensUsed} tokens</div>
+                        <div className="font-semibold text-ink-heading">
+                          {item?.cost !== null && item?.cost !== undefined && !Number.isNaN(Number(item?.cost))
+                            ? `$${Number(item.cost).toFixed(4)}`
+                            : item?.modelUsed && item.modelUsed.toLowerCase().includes('sdxl')
+                              ? 'Self-hosted (SDXL)'
+                              : 'Local GPU'}
+                        </div>
+                        <div className="text-[11px] text-ink-muted">{item?.tokensUsed ?? 0} tokens</div>
                       </td>
                       <td className="py-3.5 px-4">
                         <Badge variant={item.reviewStatus === 'approved' ? 'success' : 'warning'} dot>
@@ -338,7 +344,11 @@ export const HistoryPage = () => {
 
                   <div className="pt-3 border-t border-border flex items-center justify-between text-xs text-ink-muted">
                     <span className="tabular-nums font-semibold text-ink-heading">
-                      ${item.cost.toFixed(4)}
+                      {item?.cost !== null && item?.cost !== undefined && !Number.isNaN(Number(item?.cost))
+                        ? `$${Number(item.cost).toFixed(4)}`
+                        : item?.modelUsed && item.modelUsed.toLowerCase().includes('sdxl')
+                          ? 'Self-hosted (SDXL)'
+                          : 'Local GPU'}
                     </span>
                     <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                       <Button
@@ -412,11 +422,17 @@ export const HistoryPage = () => {
               </div>
               <div className="p-3 bg-white rounded border border-border">
                 <span className="text-ink-muted block mb-0.5">Inference Cost</span>
-                <span className="font-semibold text-ink-heading tabular-nums">${selectedItem.cost.toFixed(4)}</span>
+                <span className="font-semibold text-ink-heading tabular-nums">
+                  {selectedItem?.cost !== null && selectedItem?.cost !== undefined && !Number.isNaN(Number(selectedItem?.cost))
+                    ? `$${Number(selectedItem.cost).toFixed(4)}`
+                    : selectedItem?.modelUsed && selectedItem.modelUsed.toLowerCase().includes('sdxl')
+                      ? 'Self-hosted (SDXL)'
+                      : 'Local GPU'}
+                </span>
               </div>
               <div className="p-3 bg-white rounded border border-border">
                 <span className="text-ink-muted block mb-0.5">Tokens Consumed</span>
-                <span className="font-semibold text-ink-heading tabular-nums">{selectedItem.tokensUsed}</span>
+                <span className="font-semibold text-ink-heading tabular-nums">{selectedItem?.tokensUsed ?? 0}</span>
               </div>
               <div className="p-3 bg-white rounded border border-border">
                 <span className="text-ink-muted block mb-0.5">Pedagogical Guardrail</span>

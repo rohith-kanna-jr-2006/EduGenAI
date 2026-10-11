@@ -89,7 +89,7 @@ export const BudgetUsagePage = () => {
             Actual Incurred Spend
           </span>
           <div className="text-2xl font-bold text-ink-heading font-heading mt-1 tabular-nums">
-            ${budget.totalCostUSD.toFixed(2)}
+            ${(Number(budget.totalCostUSD) || 0).toFixed(2)}
           </div>
           <span className="text-xs text-status-success font-medium mt-1 block">
             38.4% below traditional commercial API tiers
@@ -101,7 +101,7 @@ export const BudgetUsagePage = () => {
             Smart-Route Savings
           </span>
           <div className="text-2xl font-bold text-status-success font-heading mt-1 tabular-nums">
-            ${budget.savingsUSD.toFixed(2)}
+            ${(Number(budget.savingsUSD) || 0).toFixed(2)}
           </div>
           <span className="text-xs text-ink-muted mt-1 block">
             Reinvested into school curriculum grants

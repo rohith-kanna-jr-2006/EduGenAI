@@ -9,7 +9,17 @@
  * - settings: width == 1024, height == 1024, guidanceScale (1.0-20.0), seed (integer or auto-generated)
  */
 
-const ALLOWED_CATEGORIES = ['education', 'art', 'general', 'science', 'design'];
+const ALLOWED_CATEGORIES = [
+  'education',
+  'art',
+  'general',
+  'science',
+  'design',
+  'worksheet',
+  'flashcard',
+  'poster',
+  'illustration'
+];
 const ALLOWED_CONDITIONS = ['economy', 'high_quality'];
 const MAX_PROMPT_LENGTH = 1000;
 const MAX_CONSTRAINTS_COUNT = 10;
@@ -56,7 +66,18 @@ function validateGenerationPayload(body) {
     };
   }
 
-  const { prompt, category, constraints, condition, settings } = body;
+  const {
+    prompt,
+    category,
+    constraints,
+    condition,
+    settings,
+    gradeLevel,
+    aspectRatio,
+    modelMode,
+    selectedModelId,
+    selectedModel
+  } = body;
 
   // 1. Prompt validation
   let validatedPrompt = '';
@@ -75,7 +96,7 @@ function validateGenerationPayload(body) {
   }
 
   // 2. Category validation
-  let validatedCategory = 'education';
+  let validatedCategory = 'worksheet';
   if (category !== undefined && category !== null) {
     if (typeof category !== 'string') {
       errors.push({ field: 'category', message: 'Category must be a string.' });
@@ -125,24 +146,21 @@ function validateGenerationPayload(body) {
     }
   }
 
-  // 4. Condition validation
+  // 4. Condition validation (default to economy if not provided)
   let validatedCondition = 'economy';
-  if (condition === undefined || condition === null) {
-    errors.push({
-      field: 'condition',
-      message: `Condition is required. Allowed conditions are: ${ALLOWED_CONDITIONS.join(', ')}.`
-    });
-  } else if (typeof condition !== 'string') {
-    errors.push({ field: 'condition', message: 'Condition must be a string.' });
-  } else {
-    const lowerCondition = condition.toLowerCase().trim();
-    if (!ALLOWED_CONDITIONS.includes(lowerCondition)) {
-      errors.push({
-        field: 'condition',
-        message: `Invalid condition "${condition}". Allowed conditions are: ${ALLOWED_CONDITIONS.join(', ')}.`
-      });
+  if (condition !== undefined && condition !== null) {
+    if (typeof condition !== 'string') {
+      errors.push({ field: 'condition', message: 'Condition must be a string.' });
     } else {
-      validatedCondition = lowerCondition;
+      const lowerCondition = condition.toLowerCase().trim();
+      if (!ALLOWED_CONDITIONS.includes(lowerCondition)) {
+        errors.push({
+          field: 'condition',
+          message: `Invalid condition "${condition}". Allowed conditions are: ${ALLOWED_CONDITIONS.join(', ')}.`
+        });
+      } else {
+        validatedCondition = lowerCondition;
+      }
     }
   }
 
@@ -220,7 +238,12 @@ function validateGenerationPayload(body) {
       category: validatedCategory,
       constraints: validatedConstraints,
       condition: validatedCondition,
-      settings: validatedSettings
+      settings: validatedSettings,
+      gradeLevel: typeof gradeLevel === 'string' ? gradeLevel : 'Grade 5 (Elementary)',
+      aspectRatio: typeof aspectRatio === 'string' ? aspectRatio : '1:1',
+      modelMode: typeof modelMode === 'string' ? modelMode : 'auto',
+      selectedModelId: typeof selectedModelId === 'string' ? selectedModelId : null,
+      selectedModel: typeof selectedModel === 'string' ? selectedModel : null
     }
   };
 }

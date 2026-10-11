@@ -35,14 +35,14 @@ export const GenerationStudioPage = () => {
   const [gradeLevel, setGradeLevel] = useState('Grade 5 (Elementary)');
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [modelMode, setModelMode] = useState('auto'); // 'auto' | 'manual'
-  const [manualModel, setManualModel] = useState('imagen-3-fast');
+  const [manualModel, setManualModel] = useState('gemini-3.1-flash-lite');
   const [isGenerating, setIsGenerating] = useState(false);
   const [progressStep, setProgressStep] = useState('');
   const [generatedVisual, setGeneratedVisual] = useState(null);
 
   // Approximate token calculation
   const tokenCount = Math.max(1, Math.round(prompt.length / 4));
-  const estimatedCost = modelMode === 'auto' ? 0.0032 : manualModel === 'gemini-3-pro' ? 0.0058 : 0.0032;
+  const estimatedCost = modelMode === 'auto' ? 0.0000 : manualModel.includes('gemini') ? 0.0000 : 0.0032;
 
   const categories = [
     { value: 'worksheet', label: 'Colouring Worksheet (Print Line-Art)', icon: Palette },
@@ -66,10 +66,23 @@ export const GenerationStudioPage = () => {
   ];
 
   const manualModelOptions = [
-    { value: 'imagen-3-fast', label: 'Imagen 3 Fast ($0.0032 · High-Contrast Vector)' },
-    { value: 'gemini-3-pro', label: 'Gemini 3 Pro Vision ($0.0058 · STEM & Text)' },
-    { value: 'sdxl-turbo', label: 'SDXL Turbo Education ($0.0024 · Fast Flashcards)' },
+    { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash (Google AI Studio - Fast & Free)' },
+    { value: 'gemini-3.1-flash-lite-image', label: 'Gemini 3.1 Flash Lite Image (Google AI Studio)' },
+    { value: 'gemini-nano-banana-2.1', label: 'Gemini Nano Banana 2.1 (Google AI Studio - High Quality)' },
+    { value: 'black-forest-labs/flux-1-schnell', label: 'FLUX.1 Schnell (OpenRouter Engine)' },
+    { value: 'stabilityai/stable-diffusion-xl-base-1.0', label: 'SDXL Base 1.0 (Curriculum Diagrams)' },
   ];
+
+  const handleDownloadImage = () => {
+    if (!generatedVisual?.downloadUrl || generatedVisual.downloadUrl === '#') return;
+    const link = document.createElement('a');
+    link.href = generatedVisual.downloadUrl;
+    link.download = `edugenai-${(generatedVisual.title || 'visual').toLowerCase().replace(/[^a-z0-9]/g, '-')}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    success('Image download started.');
+  };
 
   const handleGenerate = async () => {
     if (!prompt.trim()) {
@@ -78,15 +91,15 @@ export const GenerationStudioPage = () => {
     }
 
     setIsGenerating(true);
-    setProgressStep('Evaluating pedagogical safety & grade guardrails...');
+    setProgressStep('Evaluating pedagogical safety & curriculum alignment...');
     try {
-      setTimeout(() => {
-        setProgressStep('Autonomous model routing & token pruning...');
+      const timer1 = setTimeout(() => {
+        setProgressStep('Routing request to AI model engine (Gemini / Smart Router)...');
       }, 500);
 
-      setTimeout(() => {
-        setProgressStep('Synthesizing high-contrast classroom line-art...');
-      }, 1000);
+      const timer2 = setTimeout(() => {
+        setProgressStep('Synthesizing visual material...');
+      }, 1200);
 
       const res = await generationService.generateVisual({
         prompt,
@@ -98,10 +111,22 @@ export const GenerationStudioPage = () => {
         selectedModel: manualModelOptions.find((m) => m.value === manualModel)?.label,
       });
 
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+
       setGeneratedVisual(res.data);
-      success('Educational visual generated and verified successfully!');
+      if (res?.metadata?.switchedFrom) {
+        success('Educational visual generated! (Switched to Gemini via Google AI Studio)');
+      } else {
+        success('Educational visual generated successfully!');
+      }
     } catch (err) {
-      notifyError('Generation failed. Please try again.');
+      const errMsg =
+        err.response?.data?.error?.message ||
+        err.response?.data?.message ||
+        err.message ||
+        'Generation failed. Please verify your Gemini or OpenRouter model configuration.';
+      notifyError(errMsg);
     } finally {
       setIsGenerating(false);
       setProgressStep('');
@@ -147,7 +172,7 @@ export const GenerationStudioPage = () => {
                 <div className="absolute bottom-2.5 right-3 flex items-center gap-2 text-[11px] text-ink-muted bg-surface-canvas/90 px-2 py-0.5 rounded border border-border">
                   <span className="tabular-nums">Tokens: <strong className="text-ink-heading">{tokenCount}</strong></span>
                   <span>·</span>
-                  <span className="tabular-nums">Est: <strong className="text-status-success">${estimatedCost.toFixed(4)}</strong></span>
+                  <span className="tabular-nums">Est: <strong className="text-status-success">${(Number(estimatedCost) || 0).toFixed(4)}</strong></span>
                 </div>
               </div>
 
@@ -293,7 +318,7 @@ export const GenerationStudioPage = () => {
                     variant="outline"
                     size="sm"
                     icon={Download}
-                    onClick={() => alert(`Downloading "${generatedVisual.title}" print-ready file.`)}
+                    onClick={handleDownloadImage}
                   >
                     Export
                   </Button>
@@ -308,50 +333,69 @@ export const GenerationStudioPage = () => {
                   Synthesizing Educational Material
                 </h3>
                 <p className="text-xs text-ink-muted mt-1 max-w-sm">
-                  {progressStep || 'Please hold on while the model completes vector rendering and K-12 guardrail verification...'}
+                  {progressStep || 'Please hold on while OpenRouter completes inference and curriculum verification...'}
                 </p>
               </div>
             ) : generatedVisual ? (
               <div className="space-y-4">
                 {/* Visual Preview Container */}
                 <div className="relative rounded-lg border border-border bg-white overflow-hidden shadow-level-1">
-                  {/* Decorative Banner */}
-                  <div className="p-8 sm:p-12 bg-gradient-to-b from-surface-canvas to-white flex flex-col items-center justify-center text-center min-h-[340px] border-b border-border">
-                    <div className="w-20 h-20 rounded-full bg-brand-tint text-brand flex items-center justify-center shadow-sm mb-4">
-                      {category === 'worksheet' ? (
-                        <Palette className="w-10 h-10" />
-                      ) : category === 'poster' ? (
-                        <FileText className="w-10 h-10" />
-                      ) : (
-                        <Layers className="w-10 h-10" />
-                      )}
-                    </div>
-                    <h3 className="text-lg font-bold text-ink-heading font-heading max-w-md">
+                  {/* Generated Image Render Container */}
+                  <div className="relative bg-surface-canvas/60 flex flex-col items-center justify-center border-b border-border min-h-[360px] p-4 sm:p-6">
+                    {generatedVisual.downloadUrl && generatedVisual.downloadUrl !== '#' ? (
+                      <div className="w-full flex flex-col items-center">
+                        <img
+                          src={generatedVisual.downloadUrl}
+                          alt={generatedVisual.prompt || generatedVisual.title}
+                          className="max-h-[480px] w-auto max-w-full rounded-md shadow-sm object-contain border border-border bg-white"
+                        />
+                      </div>
+                    ) : (
+                      <div className="p-8 flex flex-col items-center justify-center text-center">
+                        <div className="w-16 h-16 rounded-full bg-brand-tint text-brand flex items-center justify-center shadow-sm mb-3">
+                          <Palette className="w-8 h-8" />
+                        </div>
+                        <h3 className="text-base font-bold text-ink-heading font-heading">
+                          {generatedVisual.title}
+                        </h3>
+                      </div>
+                    )}
+
+                    <h3 className="text-base font-bold text-ink-heading font-heading max-w-md text-center mt-3">
                       {generatedVisual.title}
                     </h3>
-                    <p className="text-xs text-ink-body max-w-lg mt-2 leading-relaxed">
+                    <p className="text-xs text-ink-body max-w-lg mt-1 text-center leading-relaxed italic">
                       "{generatedVisual.prompt}"
                     </p>
 
-                    <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                    <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
                       <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
-                        {generatedVisual.guardrailStatus}
+                        {generatedVisual.guardrailStatus || 'Verified'}
                       </span>
                       <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-brand-tint text-brand border border-brand/20">
                         {generatedVisual.modelUsed}
                       </span>
                       <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-surface-canvas text-ink-heading border border-border">
-                        {generatedVisual.dimensions}
+                        {generatedVisual.dimensions || '1024 × 1024'}
                       </span>
+                      {generatedVisual.generationSeconds && (
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-surface-canvas text-ink-muted border border-border">
+                          {generatedVisual.generationSeconds}s
+                        </span>
+                      )}
                     </div>
                   </div>
 
                   {/* Footer metadata breakdown */}
                   <div className="p-4 bg-surface-canvas/60 flex flex-wrap items-center justify-between text-xs text-ink-muted gap-2">
                     <div className="flex items-center gap-3">
-                      <span>Inference Cost: <strong className="text-status-success tabular-nums">${generatedVisual.cost.toFixed(4)}</strong></span>
+                      {generatedVisual.cost !== null && generatedVisual.cost !== undefined && !Number.isNaN(Number(generatedVisual.cost)) ? (
+                        <span>Inference Cost: <strong className="text-status-success tabular-nums">${Number(generatedVisual.cost).toFixed(4)}</strong></span>
+                      ) : (
+                        <span>Model: <strong className="text-ink-heading">{generatedVisual.modelUsed || 'SDXL Engine'}</strong></span>
+                      )}
                       <span>·</span>
-                      <span>Tokens: <strong className="text-ink-heading tabular-nums">{generatedVisual.tokensUsed}</strong></span>
+                      <span>Output: <strong className="text-ink-heading tabular-nums">{generatedVisual.dimensions || '1024 × 1024'}</strong></span>
                     </div>
                     <div className="flex items-center gap-2">
                       <Button
@@ -366,9 +410,9 @@ export const GenerationStudioPage = () => {
                         variant="primary"
                         size="sm"
                         icon={Download}
-                        onClick={() => alert(`Exporting ${generatedVisual.title} as 300 DPI PDF.`)}
+                        onClick={handleDownloadImage}
                       >
-                        Download PDF
+                        Download Image
                       </Button>
                     </div>
                   </div>

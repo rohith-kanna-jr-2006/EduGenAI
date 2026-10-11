@@ -34,7 +34,9 @@ export const QualityReviewPage = () => {
     setLoading(true);
     try {
       const res = await generationService.getQualityReviews();
-      setReviews(res.pending.concat(res.approved));
+      const pending = Array.isArray(res?.pending) ? res.pending : [];
+      const approved = Array.isArray(res?.approved) ? res.approved : [];
+      setReviews(pending.concat(approved));
     } catch (err) {
       notifyError('Failed to load quality reviews');
     } finally {

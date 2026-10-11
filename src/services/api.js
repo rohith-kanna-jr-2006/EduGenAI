@@ -1,11 +1,35 @@
 import axios from 'axios';
 
-// Base API URL from environment variable or standard default
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || '/api';
+/**
+ * Configure API base URL for the runtime environment:
+ * - Prefer same-origin '/api' whenever running on the same host/server (such as the AI Studio preview).
+ * - Avoid browser Mixed Content and Network Errors caused by requesting http://localhost:5000 from an HTTPS preview.
+ * - Preserve ability to configure http://localhost:5000/api or custom remote endpoints for separate local backend setups.
+ */
+function getApiBaseUrl() {
+  if (typeof window !== 'undefined' && window.location) {
+    // If running in browser preview (HTTPS / *.run.app) or on the unified port 3000 server,
+    // use same-origin '/api' so requests route directly to the mounted Express routes.
+    const isHostedPreview = window.location.protocol === 'https:' || window.location.hostname.includes('run.app');
+    const isPort3000 = window.location.port === '3000';
+
+    if (isHostedPreview || isPort3000) {
+      const configured = process.env.REACT_APP_API_BASE_URL;
+      if (configured && !configured.includes('localhost:') && !configured.includes('127.0.0.1:')) {
+        return configured;
+      }
+      return '/api';
+    }
+  }
+
+  return process.env.REACT_APP_API_BASE_URL || '/api';
+}
+
+const API_BASE_URL = getApiBaseUrl();
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000,
+  timeout: 180000,
   headers: {
     'Content-Type': 'application/json',
   },
