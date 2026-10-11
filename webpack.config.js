@@ -43,7 +43,7 @@ module.exports = {
     }),
     new webpack.DefinePlugin({
       'process.env.REACT_APP_API_BASE_URL': JSON.stringify(
-        process.env.REACT_APP_API_BASE_URL || 'http://localhost:5000/api'
+        process.env.REACT_APP_API_BASE_URL || '/api'
       ),
     }),
   ],
@@ -51,9 +51,23 @@ module.exports = {
     static: {
       directory: path.join(__dirname, 'public'),
     },
+    host: '0.0.0.0',
     port: 3000,
+    allowedHosts: 'all',
     historyApiFallback: true,
     hot: true,
     open: false,
+    setupMiddlewares: (middlewares, devServer) => {
+      const express = require('express');
+      devServer.app.use(express.json({ limit: '10mb' }));
+      devServer.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+      try {
+        const generationRoutes = require('./backend/routes/generationRoutes');
+        devServer.app.use('/api', generationRoutes);
+      } catch (err) {
+        console.warn('Failed to attach generation routes in devServer:', err.message);
+      }
+      return middlewares;
+    },
   },
 };

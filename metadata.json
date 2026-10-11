@@ -1,0 +1,8 @@
+{
+  "name": "EduGenAI",
+  "description": "AI-Powered Educational Image Generation Platform with energy-aware SDXL model routing, curriculum guardrails, and budget analytics.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

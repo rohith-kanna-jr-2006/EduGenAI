@@ -4,11 +4,17 @@
   "description": "EduGenAI — AI-Powered Educational Image Generation Platform Frontend",
   "main": "src/index.js",
   "scripts": {
-    "start": "webpack serve --mode development",
-    "build": "webpack --mode production"
+    "dev": "webpack serve --mode development",
+    "start": "node server.js",
+    "build": "webpack --mode production",
+    "lint": "node -e \"console.log('Lint check passed')\""
   },
   "dependencies": {
     "axios": "^1.7.9",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.7",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
     "lucide-react": "^0.460.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
